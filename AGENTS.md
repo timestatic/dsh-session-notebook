@@ -114,8 +114,11 @@ git diff --check
 ### 9.3 发布到 npm registry
 
 - npm 发布名为作用域形式 **`@timestatic/dsh-session-notebook`**；`package.json` 已含 `publishConfig.access: public`（作用域包默认 restricted，缺它 `npm publish` 失败）。裸 `timestatic/dsh-session-notebook` **不是合法 npm 名**：plugin-manager 的 `PACKAGE_NAME` 正则 `^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$` 只接受可选 `@scope/` 前缀加单段名，中段 `/` 会被 `parseInstallSpec` 判为 `not a package name the registry accepts`。
-- **改名耦合（硬性）**：`cordis.patch.yml` 的 bundle row `name` 是 Cordis 加载 Host 的模块标识符，plugin-manager 按包名解析 bundle（`bundleManifest`），故 row `name` 必须等于 npm 包名；改包名必须同步改它，否则模块解析失败。`package-lock.json` 顶层与 `packages[""]` 的 `name`、以及断言包名的测试（`tests/unit/loading.test.js`）也需同步。
-- **内部标识不随包名变（硬性）**：Client factory `id`、locale/RPC `namespace`、slot id 前缀、Host 存储目录 `storages/dsh-session-notebook/` 保持非作用域 `dsh-session-notebook`。RPC 方法名是单段 `dsh-session-notebook/<endpoint>`（见 §1、§2 通道语法约束），改成含 `@`/`/` 的作用域形式会破坏通道契约；改存储目录会孤立既有用户数据。改包名时**不得**顺手改这些内部标识。
+- **改名耦合（硬性）**：以下标识符必须等于 npm 包名（作用域包用作用域全名 `@timestatic/dsh-session-notebook`），改包名必须同步改，否则解析失败：
+  - `cordis.patch.yml` 的 bundle row `name`——Cordis 加载 Host 的模块标识符，plugin-manager 按包名解析 bundle（`bundleManifest`）。
+  - Client 模块加载 id——`src/client/index.template.js` 顶部 `window.__ModuleLoader__.load({ id })` 及其生成产物 `src/client/index.js`。这是 Host 解析 Client factory 的模块标识符，**约定为 id === 包名**：官方 `@deepseek-ai/dsh-client-ui-settings`、`@deepseek-ai/dsh-client-ui-chat` 及已安装的第三方作用域插件（`@zilliz/memsearch-dsh`、`@nanmicoder/dsh-agent-teams`、`@wxg-prc-cpg/browser-skill-dsh-plugin`、`@xmanrui/dsh-im`）均用作用域全名，裸名插件（`dsh-context` 等）用裸名。改名后若把 id 留成非作用域会与包名 mismatch。
+  - `package-lock.json` 顶层与 `packages[""]` 的 `name`；断言包名的测试（`tests/unit/loading.test.js`，含 `definition.id === manifest.name`）也需同步。
+- **内部标识不随包名变（硬性）**：locale/RPC `namespace`、slot id 前缀、Host 存储目录 `storages/dsh-session-notebook/`、API 路由前缀 `/api/dsh-session-notebook/` 保持非作用域 `dsh-session-notebook`。RPC 方法名是单段 `dsh-session-notebook/<endpoint>`（见 §1、§2 通道语法约束），改成含 `@`/`/` 的作用域形式会破坏通道契约；改存储目录会孤立既有用户数据。改包名时**不得**顺手改这些内部标识（注意与上一条的 Client 模块加载 id 区分：那个必须等于包名，这些必须保持非作用域）。
 - 发布是外部不可逆动作（同版本号不能重发），需授权后由用户执行；不得代用户 `npm publish`。显式指定目标 registry，避免默认配置指向镜像。`npm view` 返回 404 只能说明该 registry 未找到版本或当前身份无访问权限，不能证明发布权限：
 
 ```bash
