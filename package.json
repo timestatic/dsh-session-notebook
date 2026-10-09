@@ -1,0 +1,35 @@
+{
+  "name": "dsh-session-notebook",
+  "version": "0.0.36",
+  "private": true,
+  "description": "Capture notes from conversations, organize and search with tags, and manage edits, trash, and backups.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "exports": {
+    ".": "./src/host/index.js",
+    "./client": "./src/client/index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": ["src/client/download-timestamp.js", "src/host/json-store.js", "src/client/conversation-annotations.js", "src/host/index.js", "src/host/preview-routes.js", "src/host/manual-runtime.js", "src/client/index.js", "src/client/preview-api.js", "src/client/manual-save-controller.js", "src/client/backup-file.js", "src/client/restore-transfer.js", "src/client/markdown-file.js", "src/client/input-draft.js", "src/client/selection-draft.js", "src/client/quote.js", "src/client/text-anchor.js", "src/client/message-text-index.js", "src/client/message-highlights.js", "src/client/session-activity.js", "src/client/rewrite-draft.js", "src/query.js", "src/markdown-export.js", "src/tag-colors.js", "src/tag-domain.js", "src/note-domain.js", "src/notebook-schema.js", "src/initial-snapshot.js", "src/json-backup.js", "src/restore-candidate.js", "src/restore-upload.js", "src/snapshot-budget.js", "src/snapshot-coordinator.js", "src/manual-notebook-service.js", "locale/*.json", "icon.svg", "cordis.patch.yml"],
+  "icon": "./icon.svg",
+  "scripts": {
+    "build:client": "node scripts/build-client.mjs",
+    "check": "node scripts/build-client.mjs --check && node --check src/host/json-store.js && node --check src/client/conversation-annotations.js && node --check src/host/index.js && node --check src/host/preview-routes.js && node --check src/host/manual-runtime.js && node --check src/client/index.js && node --check src/client/preview-api.js && node --check src/client/manual-save-controller.js && node --check src/client/backup-file.js && node --check src/client/restore-transfer.js && node --check src/client/download-timestamp.js && node --check src/client/markdown-file.js && node --check src/client/input-draft.js && node --check src/client/selection-draft.js && node --check src/client/quote.js && node --check src/client/text-anchor.js && node --check src/client/message-text-index.js && node --check src/client/message-highlights.js && node --check src/client/session-activity.js && node --check src/client/rewrite-draft.js && node --check src/query.js && node --check src/markdown-export.js && node --check src/tag-domain.js && node --check src/note-domain.js && node --check src/notebook-schema.js && node --check src/initial-snapshot.js && node --check src/json-backup.js && node --check src/restore-candidate.js && node --check src/restore-upload.js && node --check src/snapshot-budget.js && node --check src/snapshot-coordinator.js && node --check src/manual-notebook-service.js && node --check tests/e2e/phase-0-browser-check.js && node --check tests/e2e/phase-0-negative-check.js && node --check tests/e2e/phase-0-viewport-check.js",
+    "test": "node --test tests/unit/*.test.js",
+    "test:unit": "node --test tests/unit/*.test.js",
+    "test:runtime": "npm --prefix tests/runtime test",
+    "test:integration": "node --test tests/integration/*.test.js",
+    "test:storage-experiments": "node --test tests/experiments/*.test.js",
+    "test:mvp-manual": "node --test tests/integration/preview-package.test.js tests/runtime/manual-runtime.test.js",
+    "pack:check": "npm pack --dry-run --ignore-scripts"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-sidebar-right", "@deepseek-ai/dsh-client-ui-workspace", "@deepseek-ai/dsh-client-ui-session"]
+    }
+  }
+}

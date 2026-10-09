@@ -1,0 +1,26 @@
+# macOS metadata
+.DS_Store
+
+# Dependencies and build output
+node_modules/
+.npm-cache/
+dist/
+coverage/
+*.tgz
+
+# Browser automation may contain session state and private URLs
+.playwright-cli/
+.sdk-reference/
+
+# Local environment and logs
+.env
+.env.*
+!.env.example
+*.log
+
+# Synthetic diagnostic tests and local runtime evidence (never package/commit)
+.diagnostic-test-output/
+.storage-test-output/
+.desktop-reference/
+diagnostics/desktop-http-observer/result.json
+diagnostics/desktop-http-observer/result.json.*.tmp

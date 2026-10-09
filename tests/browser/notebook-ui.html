@@ -1,0 +1,35 @@
+<!doctype html><html><meta charset="utf-8"><style>
+html,body{height:100%;margin:0;overflow:hidden;font-family:system-ui;background:#edf0f5}#root{height:100%;width:min(100%,900px);margin:auto;background:white;overflow:hidden;display:flex;flex-direction:column}
+</style><div id="fixture-chat" data-conversation-region="chat" data-conversation-session="fixture" style="display:none"><div class="gKv1-q_body">Source for toolbar selection.</div></div><div id="root"></div><script src="/react.js"></script><script src="/react-dom.js"></script><script>
+let definition;window.__ModuleLoader__={load:value=>definition=value};
+</script><script src="/client.js"></script><script>
+const views=new Map(),dictionaries={},none=()=>()=>{};
+const workspaces={phase:'ready',items:[{title:'Synthetic Workspace',path:'/synthetic',sessionIds:['fixture']}],archivedSessionIds:[]};
+if(new URLSearchParams(location.search).has('noWorkspace'))workspaces.items=[];
+const sessions={phase:'ready',ids:['fixture'],byId:{fixture:{id:'fixture',updatedAt:100}}};
+let input={draft:'Existing input',draftRev:0,phase:'plain',occurrences:[],attachmentIds:[]};
+const inputListeners=new Set();
+const inputSource={getSnapshot:()=>input,subscribe:fn=>{inputListeners.add(fn);return()=>inputListeners.delete(fn)}};
+const binding={key:'fixture',hooks:{input:inputSource},props:{inputActions:{insertText(text,span){
+ if(span.draftRev!==input.draftRev)return false;input={...input,draft:input.draft.slice(0,span.start)+text+input.draft.slice(span.end),draftRev:input.draftRev+1};window.fixtureInput=input;for(const fn of inputListeners)fn();return true;
+}}}};
+window.fixtureTabs=[];window.fixtureSource=[];window.fixtureInput=input;window.fixtureCalls=[];
+const ctx={
+ effect:setup=>setup(),
+ locale:{register:(ns,lang,value)=>{if(lang==='zh')Object.assign(dictionaries,value);return()=>{}},bind:()=>key=>dictionaries[key]||key,subscribe:none,getSnapshot:()=>1},
+ slots:{inject:(name,setup)=>setup(),register:(descriptor,component)=>{views.set(descriptor.name,component);return()=>{}}},
+ sidebarRightTabs:{register:()=>()=>{}},sidebarRight:{openTab:id=>window.fixtureTabs.push(id)},
+ sessions:{list:{getSnapshot:()=>sessions}},workspaces:{list:{getSnapshot:()=>workspaces}},
+ uiWorkspace:{openSession:id=>window.fixtureSource.push(id)},uiSession:{adapter:{current:{getSnapshot:()=>binding,subscribe:none}}},
+ connection:{rpc:{call:async(channel,method,payload)=>{window.fixtureCalls.push({method,payload});return await(await fetch('/rpc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method,payload})})).json()}}}
+};
+definition.factory(name=>React).apply(ctx);
+const Panel=views.get('sidebar.right.pane.tab');
+const selectionMode=new URLSearchParams(location.search).has('selection');
+if(selectionMode){document.getElementById('fixture-chat').style.cssText='position:fixed;left:20px;top:100px;width:40%;padding:20px;background:white;line-height:2';document.getElementById('root').style.cssText='width:50%;margin-left:auto;margin-right:0';}
+const Annotations=views.get('conversation.composer.dock'), Menu=views.get('sidebar.footer.action');
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(React.Fragment,null,
+ React.createElement(Menu,{wide:true}),
+ React.createElement(Annotations,{sessionId:'fixture',useWorkspaces:selector=>selector(workspaces)}),
+ React.createElement('div',{style:{flex:'1 1 0',minHeight:0}},React.createElement(Panel,{sessionId:'fixture',useTabInfo:()=>({tab:{actions:{close(){}}}}),useWorkspaces:selector=>selector(workspaces)}))));
+</script></html>

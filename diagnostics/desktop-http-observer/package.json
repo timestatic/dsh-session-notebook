@@ -1,0 +1,10 @@
+{
+  "name": "dsh-session-notebook-http-observer",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Temporary bounded passive settings HTTP observer; not a Notebook feature.",
+  "exports": { ".": "./index.js", "./package.json": "./package.json" },
+  "files": ["index.js", "summary-writer.js", "cordis.patch.yml"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

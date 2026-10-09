@@ -1,0 +1,3 @@
+- insert:
+    - id: session-notebook-http-observer
+      name: dsh-session-notebook-http-observer

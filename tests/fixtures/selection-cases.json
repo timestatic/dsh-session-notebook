@@ -1,0 +1,26 @@
+{
+  "fixtureVersion": 1,
+  "purpose": "Synthetic samples, not DSH events or evidence of a live session.",
+  "cases": [
+    { "id": "SEL-001", "role": "assistant", "sourceMarkdown": "前文 **重要结论** 后文", "visibleSelection": "前文 重要结论", "expectation": "跨 inline 节点；映射和语义不能同时保证则 plain_text" },
+    { "id": "SEL-002", "role": "user", "sourceMarkdown": "重复文字。第一处。\n\n重复文字。第二处。", "visibleSelection": "重复文字", "occurrence": 1, "prefix": "第一处。\n\n", "suffix": "。第二处。", "expectation": "第二次出现，不默认首次命中；occurrence 为零基" },
+    { "id": "SEL-003", "role": "assistant", "sourceMarkdown": "查看 [开发指南](https://example.invalid/guide)。", "visibleSelection": "开发", "expectation": "局部链接不能证明语义时 plain_text" },
+    { "id": "SEL-004", "role": "user", "sourceMarkdown": "执行 `const value = 1` 后检查。", "visibleSelection": "value = 1", "expectation": "行内代码局部选择保留空白" },
+    { "id": "SEL-005", "role": "assistant", "sourceMarkdown": "```ts\nconst value = 1;\n\n  console.log(value);\n```", "visibleSelection": "const value = 1;\n\n  console.log(value);", "expectation": "保留缩进与空行，不伪造围栏来源" },
+    { "id": "SEL-006", "role": "user", "sourceMarkdown": "- 第一项\n- 第二项 **重点**\n- 第三项", "visibleSelection": "第一项\n第二项 重点", "expectation": "跨列表项边界由真实渲染实测" },
+    { "id": "SEL-007", "role": "assistant", "sourceMarkdown": "| 名称 | 值 |\n| --- | --- |\n| 中文 | 42 |\n| emoji | 😀 |", "visibleSelection": "中文\t42", "expectation": "跨列实际文本分隔待实测，此字符串只是候选" },
+    { "id": "SEL-008", "role": "user", "sourceMarkdown": "第一段\n\n第二段\n软换行", "visibleSelection": "第一段\n\n第二段", "expectation": "跨段落与反向选择，不折叠持久空白" },
+    { "id": "SEL-009", "role": "assistant", "sourceMarkdown": "中文😀🧑‍💻é尾部", "visibleSelection": "😀🧑‍💻é", "expectation": "限制按码点；DOM UTF-16 offset 单独映射" },
+    { "id": "SEL-010", "role": "user", "sourceMarkdown": "第一行\r\n  第二行\r\n\r\n末行", "visibleSelection": "第一行\n  第二行", "expectation": "区分源 CRLF 与 DOM 换行" },
+    { "id": "SEL-011", "role": "assistant", "sourceMarkdown": "<img src=x onerror=alert(1)>\n[javascript](javascript:alert(1))\n[data](data:text/html,unsafe)", "visibleSelection": "<img src=x onerror=alert(1)>", "expectation": "不执行 HTML，禁止不安全链接协议" },
+    { "id": "SEL-012", "role": "user", "sourceMarkdown": "单", "visibleSelection": "单", "expectation": "不足两个有效字符拒绝，无写入" },
+    { "id": "SEL-013", "role": "assistant", "sourceMarkdown": "**重要结论**", "visibleSelection": "重要结论", "expectation": "完整加粗尝试精确映射，与局部跨节点区分" },
+    { "id": "SEL-014", "role": "assistant", "sourceMarkdown": "> 引用第一行\n> 引用第二行", "visibleSelection": "引用第一行\n引用第二行", "expectation": "保留行边界，不凭空补符号" }
+  ],
+  "generatedCases": [
+    { "id": "LIMIT-8000", "unit": "😀", "repeat": 8000, "expectation": "恰好 8000 码点，其余条件合法时允许" },
+    { "id": "LIMIT-8001", "unit": "😀", "repeat": 8001, "expectation": "超限拒绝、保留选区、不截断" },
+    { "id": "PERF-LONG", "unit": "长消息中的重复段落。\n\n", "repeat": 1000, "expectation": "专用测试会话展开，测试重复定位与性能" }
+  ],
+  "rejectedContexts": ["cross-message", "tool-message", "input", "textarea", "contenteditable", "plugin-panel", "action-button", "outside-conversation", "uncommitted-stream"]
+}

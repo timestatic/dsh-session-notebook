@@ -1,0 +1,64 @@
+async page => {
+  const check = (value, label) => { if (!value) throw Error(label); };
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await page.goto('http://127.0.0.1:43187/?selection=1');
+  await page.locator('[data-notebook-library]').waitFor();
+  const menu = page.getByRole('button', { name: '打开 AI 笔记', exact: true });
+  check(await menu.count() === 1, 'one AI Notes menu');
+  await menu.click();
+  check(await page.evaluate(() => window.fixtureTabs.at(-1) === 'dsh-session-notebook'), 'menu opens native pane');
+  const select = () => page.evaluate(() => {
+    const node = document.querySelector('#fixture-chat .gKv1-q_body').firstChild;
+    const range = document.createRange(); range.selectNodeContents(node);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  });
+  const toolbar = page.getByRole('dialog', { name: '选区操作', exact: true });
+  const compact = async () => {
+    await toolbar.waitFor();
+    check(await toolbar.locator('textarea').count() === 0, 'editor collapsed on new selection');
+    check(!(await toolbar.innerText()).includes('Source for toolbar selection.'), 'toolbar does not repeat quote');
+    check(await toolbar.evaluate(el => el.getBoundingClientRect().height < 80), 'compact toolbar height');
+  };
+  const lastSaved = () => page.evaluate(async () => {
+    const call = window.fixtureCalls.filter(call => call.method.endsWith('/notes/excerpt')).at(-1);
+    const all = await (await fetch('/rpc', { method: 'POST', body: JSON.stringify({method:'dsh-session-notebook/library/query', payload:{scope:'all',limit:50}}) })).json();
+    const row = all.value.items.find(item => item.quoteExcerpt === call.payload.quote.content && item.kind === call.payload.kind);
+    const detail = await (await fetch('/rpc', {method:'POST',body:JSON.stringify({method:'dsh-session-notebook/notes/get',payload:{id:row.id}})})).json();
+    return { intent: call.payload, note: detail.value.note };
+  });
+  await select(); await compact();
+  await toolbar.getByRole('button', { name: '添加标签', exact: true }).click();
+  await toolbar.getByRole('button', { name: 'TODO', exact: true }).click();
+  await toolbar.waitFor({ state: 'detached' });
+  let saved = await lastSaved();
+  check(saved.note.kind === 'highlight' && saved.note.tagIds.includes('builtin_todo'), 'quick tag persisted');
+  await select(); await compact();
+  await toolbar.getByRole('button', { name: '记笔记', exact: true }).click();
+  await toolbar.getByRole('textbox', { name: '笔记内容', exact: true }).fill('Typed annotation');
+  await toolbar.getByRole('button', { name: '保存笔记', exact: true }).click();
+  await toolbar.waitFor({ state: 'detached' });
+  saved = await lastSaved();
+  check(saved.note.kind === 'note' && saved.note.bodyMarkdown === 'Typed annotation', 'annotation persisted');
+  await select(); await compact();
+  await toolbar.getByRole('button', { name: '添加标签', exact: true }).click();
+  const tagPicker = toolbar.locator('[data-annotation-tag-picker]');
+  const important = tagPicker.getByRole('checkbox', { name: '重要' });
+  const todo = tagPicker.getByRole('checkbox', { name: 'TODO' });
+  await important.check();
+  await todo.check();
+  check(await important.isChecked() && await todo.isChecked(), 'ordinary tags select without a modifier key');
+  await todo.uncheck();
+  check(await important.isChecked() && !(await todo.isChecked()), 'unchecking one tag retains the other');
+  await toolbar.getByRole('textbox', { name: '新标签名称', exact: true }).fill(`New-${Date.now()}`);
+  await toolbar.getByRole('button', { name: '保存划线', exact: true }).click();
+  await toolbar.waitFor({ state: 'detached' });
+  saved = await lastSaved();
+  check(saved.note.tagIds.length === 2 && saved.note.tagIds.includes('builtin_important'), 'existing plus new tag persisted together');
+  await select(); await compact();
+  await page.screenshot({ path: '/private/tmp/notebook-toolbar-0.0.21.png' });
+  await toolbar.getByRole('button', { name: '取消选区操作', exact: true }).click();
+  check(errors.length === 0, errors.join(';'));
+  console.log('PASS compact selection, quick tags, new tag transaction, annotation, repeated selection reset and native menu');
+}

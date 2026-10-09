@@ -1,0 +1,85 @@
+async page => {
+  const check = (value, name) => { if (!value) throw new Error(name); };
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width: 720, height: 720 });
+  await page.goto('http://127.0.0.1:43187');
+  await page.locator('[data-notebook-library]').waitFor();
+  check(await page.locator('input[type=file]').count() === 0, 'unfinished backup import hidden');
+  const panel = page.locator('[data-notebook-panel]');
+  await page.locator('[data-notebook-library] li').first().waitFor();
+  check(await panel.evaluate(el => el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY === 'auto'), 'panel must scroll');
+  await panel.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  check(await panel.evaluate(el => el.scrollTop > 0), 'scroll must reach bottom');
+  const row = page.locator('[data-notebook-library] li').filter({ hasText: 'Synthetic source paragraph' }).first();
+  await row.locator('[data-note-more] summary').click();
+  let releaseDetail;
+  const held = new Promise(resolve => { releaseDetail = resolve; });
+  await page.route('**/rpc', async route => {
+    if (route.request().postDataJSON()?.method.endsWith('/notes/get')) await held;
+    await route.continue();
+  });
+  await row.getByRole('button', { name: '详情', exact: true }).click();
+  check(await row.locator('[data-note-more] button').filter({ hasText: /编辑笔记|补充笔记 \/ 标签/ }).isDisabled(), 'pending detail blocks another modal');
+  check(await row.getByRole('button', { name: '转换类型', exact: true }).count() === 0, 'conversion action removed');
+  releaseDetail();
+  await page.locator('[data-note-detail]').waitFor({ state: 'visible' });
+  await page.unroute('**/rpc');
+  await page.locator('[data-note-detail]').getByRole('button', { name: '返回列表', exact: true }).click();
+  await row.getByRole('button', { name: '打开来源会话', exact: true }).click();
+  check(await page.evaluate(() => window.fixtureSource.includes('fixture')), 'source navigation');
+  const advanceOutsideView = () => page.evaluate(async () => {
+    const rpc = async (method, payload) => (await (await fetch('/rpc', { method: 'POST',
+      body: JSON.stringify({ method: `dsh-session-notebook/${method}`, payload }) })).json());
+    const library = (await rpc('library/query', { scope: 'all', limit: 1 })).value;
+    const note = (await rpc('notes/get', { id: library.items[0].id })).value.note;
+    const outcome = await rpc('notes/edit', { requestId: crypto.randomUUID(), epoch: library.epoch,
+      expectedRevision: library.revision, id: note.id, expectedVersion: note.version, title: 'External revision change' });
+    if (!outcome.ok) throw Error('external revision fixture failed');
+  });
+  await advanceOutsideView();
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await row.locator('[data-note-more] summary').click();
+  await row.getByRole('button', { name: '复制 Markdown', exact: true }).click();
+  check(!(await row.locator('[data-note-more]').evaluate(el => el.open)), 'copy closes more menu');
+  await page.locator('[data-library-feedback]').getByText('已复制 Markdown。', { exact: true }).waitFor();
+  await row.locator('[data-note-more] summary').click();
+  check((await page.evaluate(() => navigator.clipboard.readText())).includes('Synthetic source'), 'clipboard content');
+  await row.getByRole('button', { name: '下载此笔记 Markdown', exact: true }).click();
+  const exportDialog = page.locator('[data-markdown-export]');
+  await exportDialog.waitFor({ state: 'visible' });
+  check(await exportDialog.getByRole('checkbox').count() === 5, 'export options in dialog');
+  const downloadWait = page.waitForEvent('download');
+  await exportDialog.getByRole('button', { name: '确认下载 Markdown', exact: true }).click();
+  const download = await downloadWait;
+  await exportDialog.waitFor({ state: 'detached' });
+  check(download.suggestedFilename().endsWith('.md'), 'download filename');
+  await advanceOutsideView();
+  await row.locator('[data-note-more] summary').click();
+  await row.getByRole('button', { name: '写入当前输入框', exact: true }).click();
+  await page.locator('[data-input-confirm]').waitFor({ state: 'visible' });
+  check(await page.locator('[data-input-confirm]').evaluate(el => { const r=el.getBoundingClientRect(); return r.top>=0 && r.bottom<=innerHeight; }), 'input dialog visible');
+  const inserted = await page.locator('[data-input-confirm] pre').last().textContent();
+  check(inserted.includes('Synthetic source') && !/导出时间|会话标题|工作区|会话 ID|消息 ID/.test(inserted), 'input preview contains only note text');
+  await page.locator('[data-input-confirm]').getByRole('button', { name: '追加到最新草稿', exact: true }).click();
+  check(await page.evaluate(() => window.fixtureInput.draft.includes('Synthetic source')), 'input insertion');
+  check(!/导出时间|会话标题|工作区|会话 ID|消息 ID/.test(await page.evaluate(() => window.fixtureInput.draft)), 'input excludes export metadata');
+  await row.locator('[data-note-more] summary').click();
+  await row.getByRole('button', { name: /编辑笔记|补充笔记 \/ 标签/ }).click();
+  await page.locator('[data-note-edit] input[type=text]').waitFor();
+  check(await page.locator('[data-note-edit]').evaluate(el => el.getBoundingClientRect().top>=0), 'edit visible');
+  const editedTitle = `Browser edited title ${Date.now()}`;
+  await page.locator('[data-note-edit] input[type=text]').fill(editedTitle);
+  await page.locator('[data-note-edit]').getByRole('button', { name: '保存修改', exact: true }).click();
+  await page.locator('[data-note-edit]').waitFor({ state: 'detached' });
+  check(await page.evaluate(async expectedTitle => {
+    const call=window.fixtureCalls.filter(call=>call.method.endsWith('/notes/edit')).at(-1);
+    const result=await(await fetch('/rpc',{method:'POST',body:JSON.stringify({method:'dsh-session-notebook/notes/get',payload:{id:call.payload.id}})})).json();
+    return result.value.note.title===expectedTitle;
+  }, editedTitle), 'edit committed and read back');
+  await page.setViewportSize({ width: 360, height: 640 });
+  check(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1), 'narrow viewport horizontal overflow');
+  await page.screenshot({ path: '/private/tmp/notebook-ui-0.0.21.png' });
+  check(errors.length === 0, errors.join(';'));
+  console.log('PASS: scroll, source, clipboard, download, input, edit, no conversion/import, narrow viewport');
+}
