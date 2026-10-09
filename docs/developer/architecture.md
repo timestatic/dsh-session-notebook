@@ -32,7 +32,7 @@ Client (index.template.js + 内联模块)
 - 元数据文件是唯一提交点，笔记 data 文件不可变；新 data 同步后替换元数据，成功后发布内存状态。损坏/不支持的库不能按空库初始化。固定路径 sentinel 用于跨进程 fail-fast；异常退出后的残留需要离线核实，**不得在应用中自动清除或推断支持共享介质/跨设备一致性**。
 - 有效元数据与引用 data 总预算 50 MiB；收据最多 100000 条、最多 16 MiB。限额不是对任意数据库规模或响应时间的承诺。
 - 当前 JSON 备份可导出；`backups/begin|chunk|finish|preview|cancel` 仅提供上传、校验和影响预览，**不提供应用内提交恢复**。旧设计文件中“受控整库恢复已完成”的要求仍属未来目标。
-- 当前工作区侧重单 Desktop Host；独立 Web、Desktop 重启读回、禁用后 Gateway 共存与未认证访问须按新包重新验收；详见 [根 README 的状态](../../README.md#当前状态与验收边界) 和 [开发约束](../../AGENTS.md)。
+- 当前工作区侧重单 Desktop Host；独立 Web、Desktop 重启读回、禁用后 Gateway 共存与未认证访问须按新包重新验收；验收边界见 [开发约束](../../AGENTS.md) §6。
 
 ## 定位和验证
 

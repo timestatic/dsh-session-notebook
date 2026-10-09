@@ -7,7 +7,13 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org/)
 [![Version](https://img.shields.io/badge/version-0.1.0-blue)](./package.json)
 [![Platform](https://img.shields.io/badge/platform-DSH%20Desktop%20%2B%20Web-lightgrey)](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/DESIGN.md)
-[![deepseek-harness](https://img.shields.io/badge/topic-deepseek--harness-6f42c1)](https://github.com/topics/deepseek-harness)
+[![dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-purple)](https://github.com/topics/dsh-plugin)
+[![deepseek-harness](https://img.shields.io/badge/topic-deepseek--harness-purple)](https://github.com/topics/deepseek-harness)
+
+[![note-taking](https://img.shields.io/badge/topic-note--taking-blue)](https://github.com/topics/note-taking)
+[![personal-knowledge-management](https://img.shields.io/badge/topic-personal--knowledge--management-blue)](https://github.com/topics/personal-knowledge-management)
+[![knowledge-management](https://img.shields.io/badge/topic-knowledge--management-blue)](https://github.com/topics/knowledge-management)
+[![local-first](https://img.shields.io/badge/topic-local--first-blue)](https://github.com/topics/local-first)
 
 </div>
 
@@ -15,7 +21,6 @@
 
 插件只在本机存储数据，不采集遥测、不自动把笔记送给模型。它复用宿主提供的 React、主题与连接通道，不接管页面、不捆绑第二份运行时、不注册共享 `/api` 拦截器，因此不会破坏 DSH 官方的启动、API Gateway、认证与连接生命周期。
 
-> 当前工作区版本 `0.1.0`。Web 端验收由用户确认已完成；本次版本号变更后的 Web 实际载入版本和 Desktop 运行时仍待分别复核，不将先前 Web 验收直接视作新包已安装。发布门禁结果以本轮重新执行为准，详见[当前状态](#当前状态与验收边界)。
 
 ## 目录
 
@@ -26,7 +31,6 @@
 - [能力边界与限制](#能力边界与限制)
 - [开发检查](#开发检查)
 - [文档](#文档)
-- [当前状态与验收边界](#当前状态与验收边界)
 
 ## 能做什么
 
@@ -55,6 +59,14 @@ npm run build:client          # 由模板生成 src/client/index.js（首次或�
 npm run check                 # 校验 Client 产物与模板一致 + 全部入口语法检查
 npm test                      # 运行单元测试
 ```
+
+### 安装到 Web
+
+```bash
+dsh plugin --profile web add @timestatic/dsh-session-notebook@0.1.0
+```
+
+Profile 名可用 `ls ~/.dsh/profiles/` 查看（`$DSH_HOME` 未设置时为 `~/.dsh`）。安装后启用插件，按需重启 Web Host。
 
 ### 安装到 Desktop
 
@@ -86,21 +98,9 @@ git diff --check
 
 打包前确认版本号已在 **四处同步**：`package.json`、`src/client/index.template.js` 的 `version` 常量、生成后的 `src/client/index.js`、以及本 README。入包内容由 `package.json` 的 `files` 白名单决定，只含 Host/Client 源码、`locale/*.json`、`icon.svg`、`cordis.patch.yml` 与 README；测试、`docs/`、SDK 参考与测试产物不入包。
 
-### 2. 发布到公共 npm
+发布到 registry 属开发阶段流程，其命令与命名硬性约束见[开发约束](https://github.com/timestatic/dsh-session-notebook/blob/main/AGENTS.md) §9.3。
 
-npm 包名为 **`@timestatic/dsh-session-notebook`**（作用域包）。`package.json` 已配 `publishConfig.access: public`；示例显式指定 npmjs.org，避免本机默认 registry 指向镜像。查询返回 404 **仅说明该 registry 未找到该版本或当前身份无访问权限**，不证明账户拥有发布权限；正式发布不可逆，同版本号不能重发，必须由用户单独确认后执行。
-
-```bash
-npm view @timestatic/dsh-session-notebook@0.1.0 version --registry=https://registry.npmjs.org
-npm login --registry=https://registry.npmjs.org     # 核实对 @timestatic 的发布权限
-npm publish --dry-run --ignore-scripts --registry=https://registry.npmjs.org
-# 核对内容、版本、账户与授权后由用户运行：
-npm publish --ignore-scripts --registry=https://registry.npmjs.org
-```
-
-> Client factory `id` 必须与 npm 包名 `@timestatic/dsh-session-notebook` 一致，供宿主按包名加载。locale/RPC `namespace`、slot id 和存储目录 `storages/dsh-session-notebook/` 仍使用非作用域的 `dsh-session-notebook`；RPC 通道名保持 `dsh-session-notebook/<endpoint>`，以免破坏既有通信与数据位置。
-
-### 3. 安装 / 启用 / 卸载
+### 2. 安装 / 启用 / 卸载
 
 普通终端的 `dsh plugin` CLI 只能管理非 Desktop Profile。发布到 registry 后，Web Profile 可按「包名@版本」安装：
 
@@ -134,7 +134,7 @@ Desktop Profile **由 Electron 应用独占管理**；普通终端执行 `dsh pl
 - **禁止**：手工编辑 Profile 的 `package.json`/`cordis.patch.yml`、在 Profile 内跑 pnpm/npm、删除插件数据、启动第二套宿主、用假端点或手改 bundles 绕过管理器。
 - 旧 Web（如 3080，DSH `0.1.5-rc.1`）可能未挂载管理 Remote，此时不要改用手工 Profile 或旧 CLI 转发安装。
 
-### 4. 安装后验收
+### 3. 安装后验收
 
 安装成功（`exitCode 0` / Slot 注册成功）**不等于**功能通过。宣称「已安装可用」前需取得真实运行时证据：Desktop 启动正常、`POST /api/settings/describe` 返回 200、笔记库显示预期版本、health/list 经独立 RPC 通道返回正确结构、禁用后官方 Gateway 仍工作、未认证访问仍被拒绝。
 
@@ -187,11 +187,3 @@ git diff --check
 - [开发者索引](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/developer/llms.txt) · [架构速览](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/developer/architecture.md)
 - [交互原型](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/UI_PROTOTYPE.html)（历史草图） · [兼容事故与测试摘要](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/evidence/compatibility-and-tests.md)
 - [证据索引](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/evidence/README.md) · [开发与发布约束](https://github.com/timestatic/dsh-session-notebook/blob/main/AGENTS.md)
-
-## 当前状态与验收边界
-
-`0.1.0` 的工作区源码接入了专属文件存储与笔记业务路由，支持会话正文选区保存与文本锚点高亮。**Web 端验收已由用户确认完成**；本仓库未记录该次验收的具体包版本、场景清单和 HTTP 证据，因此不推断 `0.1.0` 新包已在 Web 安装、启用或逐项通过。发布前重新核对源码、隔离介质、打包与新包内容。
-
-**尚未完成**：没有在本轮对 `0.1.0` 新包执行 Web/Desktop 安装、启停或重启。Desktop 新功能仍需真实保存、重启读回、选区与重新挂载验收；Web 上线后也应核对实际版本和宿主 Gateway、认证。旧加载 / 连接 / 主题 / 键盘与 Gateway 结果及适用范围汇总于[兼容事故与测试摘要](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/evidence/compatibility-and-tests.md)，文件存储决策见[轻量文件存储与划线接入](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/evidence/lightweight-notebook-0.0.16.md)。
-
-逐版本开发日志已从工作树裁剪；关键事故、设计和验收边界见[证据索引](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/evidence/README.md)，原始过程记录可查 Git 历史。
