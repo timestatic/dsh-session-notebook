@@ -1,81 +1,197 @@
+<div align="center">
+
 # dsh-session-notebook
 
-DSH AI 会话笔记本：面向 DeepSeek Harness 会话的本地笔记插件，支持划线、引用、Markdown 笔记、标签、搜索、来源回链与导出。
+面向 DeepSeek Harness（DSH）会话的本地笔记插件：把对话里值得留下的内容划线、引用、整理成可搜索的笔记库。
 
-## 当前状态
+[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org/)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue)](./package.json)
+[![Platform](https://img.shields.io/badge/platform-DSH%20Desktop%20%2B%20Web-lightgrey)](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/DESIGN.md)
+[![deepseek-harness](https://img.shields.io/badge/topic-deepseek--harness-6f42c1)](https://github.com/topics/deepseek-harness)
 
-当前工作区版本 `0.0.36` 接入了正式 Host 的专属文件存储与笔记业务路由，并增加会话正文选区保存和文本锚点高亮。存储结构为 `notes.json` 元数据加同目录 `data/<uuid>.json` 笔记文件；默认位置为 `$DSH_HOME/storages/dsh-session-notebook/`，未设置 DSH_HOME 时使用 `~/.dsh/`。插件配置 `storageFile` 可指定规范绝对路径，不读取其他插件数据。
+</div>
 
-只支持单一进程独占一个库。0.0.26 增加固定路径独占 sentinel，另一进程尝试打开同库时立即 `STORE_OWNED`，Host 保持存储未就绪且不开放写路由；非正常退出的残留 sentinel 不自动清理，需要离线核实后人工恢复。此协作机制不代替恶意同用户进程或跨机器存储的一致性锁。有效元数据与引用 data 总预算为 50 MiB；保存还保留字段与请求限额。元数据是唯一提交点：先同步变更 data，再替换元数据，成功后发布内存状态并回收旧 data。损坏或缺失已引用 data 时停写，不把故障库当空库；未知提交停写并保留草稿。收据最多100000条、最多16 MiB，超过时拒绝新修改。没有应用内坏库替换恢复；JSON 备份导出仍可用。分文件降低写入量，现有业务仍在内存中组装完整 Snapshot，不宣称已支持无限库容量。
+`dsh-session-notebook`（界面名「AI 笔记」）是一个常驻 DSH 的 npm Bundle 插件。它在会话右侧栏提供一个统一的笔记库，让你把 AI 对话中的片段沉淀为持久、可检索、可导出的个人知识，而不是散落在一次次会话记录里。
 
-划线首版使用当前会话、准确原文和上下文，不保存虚构的官方 messageId。两个选区端点必须在目标版本同一正文内；多处文字匹配不自动选第一处。Client 继续走宿主 RPC carrier，Host 使用精确 Fetch 路由与公开 admission，不注册共享 `/api` interceptor。
+插件只在本机存储数据，不采集遥测、不自动把笔记送给模型。它复用宿主提供的 React、主题与连接通道，不接管页面、不捆绑第二份运行时、不注册共享 `/api` 拦截器，因此不会破坏 DSH 官方的启动、API Gateway、认证与连接生命周期。
 
-本轮验证包括源码、隔离介质、本地浏览器合成场景和打包。没有安装、启停或重启 Desktop；新功能仍需用户对新包做真实保存、重启读回、选区与重新挂载验收。旧加载/连接/主题/键盘和 Gateway 结果保留在[Desktop门禁矩阵](<docs/evidence/desktop-step-0-2-gate.md>)，只对新包做必要回归，不重复作为主要交付目标。最新方案见[轻量文件存储与划线接入](<docs/evidence/lightweight-notebook-0.0.16.md>)。
+> 当前工作区版本 `0.1.0`。Web 端验收由用户确认已完成；本次版本号变更后的 Web 实际载入版本和 Desktop 运行时仍待分别复核，不将先前 Web 验收直接视作新包已安装。发布门禁结果以本轮重新执行为准，详见[当前状态](#当前状态与验收边界)。
 
-0.0.18 按用户反馈收敛界面：左侧 AI 笔记菜单统一打开原生右边栏，移除下方重复入口；选区默认只显示划线、标签和记笔记按钮，展开后选择或创建标签；卡片不再显示转换类型，日常界面不再显示尚未完成恢复的 JSON 备份预览。保留笔记编辑、Markdown 操作和 JSON 备份导出。验证记录见[界面收敛与标签保存](docs/evidence/notebook-ui-0.0.18.md)。
+## 目录
 
-0.0.19 优化侧栏布局、常用与高级筛选、卡片摘要与标签、时间和来源展示、手工编辑区、弹窗及明暗主题。验证覆盖 1400px 窗口中的 380px 右栏，详情、编辑和输入确认不受侧栏裁剪。见[界面优化记录](docs/evidence/notebook-ui-0.0.19.md)。
+- [能做什么](#能做什么)
+- [快速开始](#快速开始)
+- [打包与安装](#打包与安装)
+- [数据存储](#数据存储)
+- [能力边界与限制](#能力边界与限制)
+- [开发检查](#开发检查)
+- [文档](#文档)
+- [当前状态与验收边界](#当前状态与验收边界)
 
-0.0.20 增加标签按钮即时筛选，选择标签会清除互斥的无标签条件；摘录保存后刷新已打开库和标签目录。侧栏菜单去白色框并增加图标，右栏头部显示版本。源码及本地测试通过。2026-10-07 经用户批准，标签保存→刷新→即时筛选、菜单及通用 UI/窄栏/主题浏览器场景通过。用户确认此前运行0.0.18。现有回收站逻辑保留，未改变删除语义。
+## 能做什么
 
-0.0.21 统一右栏为一个笔记库，默认显示所有笔记；左侧菜单是打开右栏的唯一外部入口。右栏内部提供笔记、回收站、标签、备份导航和新建笔记。去掉第二套手工笔记列表与打开/关闭笔记库按钮。次要卡片操作收进“更多”，选择后才显示批量操作。普通删除移入回收站；永久删除只在回收站中经确认后执行。标签筛选不会提交未应用的搜索草稿；时间采用本地日期时间控件，传输仍为带时区的 ISO 时间。
+- **划线与引用**：选中会话正文即可保存为划线，附带准确原文、上下文与文本锚点；不伪造官方 messageId。
+- **笔记与改写**：在划线上补充正文，或基于原文改写、空白新建手工笔记；原始引用只读，正文独立编辑。
+- **标签组织**：创建、重命名、合并、删除标签，支持 AND/OR 与「无标签」组合筛选；内置 TODO、重要、待验证快捷标签。
+- **搜索与查询**：按正文、引用、标题、来源、标签检索；按当前会话 / 当前工作区 / 全部来源筛选。
+- **持久高亮**：在当前会话已挂载的消息上重绘高亮，点击命中可打开详情。
+- **回收站**：普通删除进回收站可恢复，永久删除需单独确认；删除标签只解除关联，不删笔记。
+- **导出与备份**：勾选笔记导出为单个 UTF-8 Markdown 文件，或导出完整 JSON 备份；下载文件名带本地时间后缀。
 
-选区批注正文不会因快捷标签或划线保存被丢弃；取消已有正文需要确认。为划线补充正文使用同一笔记的编辑事务，保留 ID、引用、锚点和来源。标签管理提供逐行重命名、合并、删除操作；删除标签只移除关联，不删除笔记。确认弹窗内可按原请求核对丢失回包，关闭弹窗保留待确认操作。冲突按钮改为“使用最新版本继续编辑”，不会声称已保存。详见[统一笔记库与操作回归](docs/evidence/notebook-ui-0.0.21.md)。
+界面按明暗主题适配，右栏头部显示当前版本。左侧「AI 笔记」菜单是打开右栏笔记库的唯一外部入口。
 
-## 当前可执行检查
+## 快速开始
 
-使用 Node.js 22 及以上版本。运行 `npm ci --prefix tests/runtime` 准备隔离运行时依赖。
-部分单测直接验证目标 SDK 源码，需要本地 `.sdk-reference/`：`cordis/package` 对应
-`@deepseek-ai/cordis@4.0.4`，`connection/package` 对应
-`@deepseek-ai/dsh-client-connection@0.2.0-rc.2`，`storage-json/package` 和
-`storage-domain/package` 分别对应同版本的 `@deepseek-ai/dsh-storage-json` 和
-`@deepseek-ai/dsh-storage-domain`。这些目录使用官方 npm 包解压内容，保留 `package/lib/index.js`。
-SDK 参考、运行时依赖和测试产物均不提交，也不进入插件包。
+### 环境要求
 
-```bash
-npm run check
-npm test
-npm run test:integration
-npm run test:runtime
-npm run pack:check
-```
+- Node.js `>= 22`（开发基线见[仓库 .nvmrc](https://github.com/timestatic/dsh-session-notebook/blob/main/.nvmrc)；该文件不随 npm 包分发）。
+- 已安装并登录的 **DeepSeek Harness Desktop 或独立 Web Host**（目标版本 `0.2.0-rc.2`）。安装与启用需使用目标 Profile 对应的官方管理入口。
 
-包直接发布 JS 源码，Client 由构建脚本内联生成。本地单元测试覆盖发布入口、生命周期、侧栏、选区、锚点和文件存储故障边界。集成测试使用正式 Host 验证保存与重开，运行时测试使用真实 Cordis Context 验证加载和卸载。这些结果不替代真实 Desktop 网络、浏览器绘制和全流程验收。
-
-### 可重复的真实页面验收
-
-使用已经授权且登录的 Playwright 会话运行 [Phase 0 浏览器检查](<tests/e2e/phase-0-browser-check.js>)：
-
-```bash
-playwright-cli -s=sn-foreground run-code --filename=tests/e2e/phase-0-browser-check.js
-```
-
-脚本检查全局入口、版本、生产 health/list RPC、键盘打开、浮层内 Esc/焦点恢复、关闭重开与官方 Gateway 两次 POST 200；成功或失败均尝试关闭本次打开的浮层。若页面已有 Notebook 浮层、入口不唯一或标签页在后台，先安全失败，不关闭原有浮层。不会创建浏览器、获取凭据、写笔记或修改安装状态。本轮在 3080 实际 Web 页面通过；不能代替 Desktop 窗口验收或正式持久安装。完整记录见 [当前验收证据](<docs/evidence/phase-0-current-verification.md>)。
-
-另有 [非法请求验收脚本](<tests/e2e/phase-0-negative-check.js>)，在同一个授权会话运行：
+### 本地构建
 
 ```bash
-playwright-cli -s=sn-foreground run-code --filename=tests/e2e/phase-0-negative-check.js
+npm ci                        # 安装工作区依赖
+npm run build:client          # 由模板生成 src/client/index.js（首次或改模板后）
+npm run check                 # 校验 Client 产物与模板一致 + 全部入口语法检查
+npm test                      # 运行单元测试
 ```
 
-验证非法 query/payload/method/信封字段、畸形 JSON、错误 Content-Type 与未知端点；HTTP 200 的 RPC 错误也必须校验匹配 rpcId 与 VALIDATION_FAILED，不能误认成功。脚本的浏览器 fetch 仅是只读测试探测，不是生产 Client carrier。
+### 安装到 Desktop
 
-[多视口检查](<tests/e2e/phase-0-viewport-check.js>) 需先取得临时改变视口的授权，检查 480×640、800×600 并在 finally 恢复原尺寸；运行 `playwright-cli -s=sn-desktop-web run-code --filename=tests/e2e/phase-0-viewport-check.js`。会话名称不代表平台，三个脚本都会验证实际 origin 为用户指定的 3080。
+插件通过 DSH 官方 `plugin_manager` 安装，**不手工修改 Profile**。完整步骤见[打包与安装](#打包与安装)与 [开发约束](https://github.com/timestatic/dsh-session-notebook/blob/main/AGENTS.md) §9。安装、启用、重启均需你单独授权。
 
-旧 Web 缺少官方插件管理工具且用户选择不升级，目前采用启动覆盖测试；仍不满足指南 Step 1/2 的正式持久 Bundle 门禁，不得因此提前开放存储写入。
+### 开始使用
+
+安装并启用、按需重启 Desktop 后：
+
+1. 点击左侧「AI 笔记」菜单，打开右侧笔记库。
+2. 在会话中选中一段文字，用浮层保存为划线，或补充正文 / 改写为笔记。
+3. 在右栏用标签、搜索与来源筛选整理笔记；勾选后可导出 Markdown 或 JSON 备份。
+
+## 打包与安装
+
+> 本节是简要说明。权威流程与硬性约束以[开发约束](https://github.com/timestatic/dsh-session-notebook/blob/main/AGENTS.md) §9 为准。
+
+### 1. 打包
+
+插件直接发布 JS 源码，无编译步骤；Client 由 `scripts/build-client.mjs` 从模板内联生成。
+
+```bash
+npm run check                 # 生成/校验 Client + 语法检查
+npm test                      # 单元测试
+npm run pack:check            # npm pack --dry-run，核对 tarball 清单
+npm pack --ignore-scripts     # 生成 timestatic-dsh-session-notebook-<version>.tgz
+git diff --check
+```
+
+打包前确认版本号已在 **四处同步**：`package.json`、`src/client/index.template.js` 的 `version` 常量、生成后的 `src/client/index.js`、以及本 README。入包内容由 `package.json` 的 `files` 白名单决定，只含 Host/Client 源码、`locale/*.json`、`icon.svg`、`cordis.patch.yml` 与 README；测试、`docs/`、SDK 参考与测试产物不入包。
+
+### 2. 发布到公共 npm
+
+npm 包名为 **`@timestatic/dsh-session-notebook`**（作用域包）。`package.json` 已配 `publishConfig.access: public`；示例显式指定 npmjs.org，避免本机默认 registry 指向镜像。查询返回 404 **仅说明该 registry 未找到该版本或当前身份无访问权限**，不证明账户拥有发布权限；正式发布不可逆，同版本号不能重发，必须由用户单独确认后执行。
+
+```bash
+npm view @timestatic/dsh-session-notebook@0.1.0 version --registry=https://registry.npmjs.org
+npm login --registry=https://registry.npmjs.org     # 核实对 @timestatic 的发布权限
+npm publish --dry-run --ignore-scripts --registry=https://registry.npmjs.org
+# 核对内容、版本、账户与授权后由用户运行：
+npm publish --ignore-scripts --registry=https://registry.npmjs.org
+```
+
+> Client factory `id` 必须与 npm 包名 `@timestatic/dsh-session-notebook` 一致，供宿主按包名加载。locale/RPC `namespace`、slot id 和存储目录 `storages/dsh-session-notebook/` 仍使用非作用域的 `dsh-session-notebook`；RPC 通道名保持 `dsh-session-notebook/<endpoint>`，以免破坏既有通信与数据位置。
+
+### 3. 安装 / 启用 / 卸载
+
+普通终端的 `dsh plugin` CLI 只能管理非 Desktop Profile。发布到 registry 后，Web Profile 可按「包名@版本」安装：
+
+```bash
+dsh plugin --profile web add @timestatic/dsh-session-notebook@0.1.0
+```
+
+Profile 名可用 `ls ~/.dsh/profiles/` 查看（`$DSH_HOME` 未设置时为 `~/.dsh`）。
+
+**尚未发布到 npm 时**，Web Profile 可安装本地包：
+
+```bash
+dsh plugin --profile web add /绝对路径/timestatic-dsh-session-notebook-0.1.0.tgz
+```
+
+Desktop Profile **由 Electron 应用独占管理**；普通终端执行 `dsh plugin --profile desktop ...` 会直接报错。请使用 Desktop 的插件管理页面，或在支持 `plugin_manager` 工具的 Desktop 会话中执行管理操作。不要手工编辑 Profile 文件或在 Profile 中运行包管理器。
+
+`dsh plugin add` 的 spec 支持 registry 名、绝对路径、git 地址与 tarball；裸 `timestatic/dsh-session-notebook` 不是合法 registry 名会被拒。管理器可检查**已声明的 DSH peer 约束**；本包当前未声明 `peerDependencies`，因此安装前无法据此自动判定目标 DSH 版本兼容，须按下文在目标宿主实机验收，不把安装成功当作兼容性通过。
+
+也可经官方 `plugin_manager` 工具安装，且每步先取得授权：
+
+| 步骤 | 工具调用 | 关注返回 |
+|---|---|---|
+| 查看现状 | `list_bundles` | 当前 Profile 已装版本、`enabled` |
+| 卸载旧包 | `remove_bundle`（包名 `@timestatic/dsh-session-notebook`） | `exitCode`、`changed`、`application`、`warnings` |
+| 安装 | `install_bundle`（本地 `.tgz`、registry 名或 git/tarball spec） | `exitCode`、`changed`、`application`、`warnings` |
+| 启用 / 禁用 | `set_bundle enabled=true/false` | `changed`、`application`、`warnings` |
+| 复核 | `list_bundles` | 版本、`installed`、`enabled` |
+
+- `application=restart-required` 时，替换已加载包通常需**完整退出 Desktop 再重开**；不得凭源码变化声称运行时已更新。
+- **禁止**：手工编辑 Profile 的 `package.json`/`cordis.patch.yml`、在 Profile 内跑 pnpm/npm、删除插件数据、启动第二套宿主、用假端点或手改 bundles 绕过管理器。
+- 旧 Web（如 3080，DSH `0.1.5-rc.1`）可能未挂载管理 Remote，此时不要改用手工 Profile 或旧 CLI 转发安装。
+
+### 4. 安装后验收
+
+安装成功（`exitCode 0` / Slot 注册成功）**不等于**功能通过。宣称「已安装可用」前需取得真实运行时证据：Desktop 启动正常、`POST /api/settings/describe` 返回 200、笔记库显示预期版本、health/list 经独立 RPC 通道返回正确结构、禁用后官方 Gateway 仍工作、未认证访问仍被拒绝。
+
+## 数据存储
+
+- 结构：`notes.json` 元数据 + 同目录 `data/<uuid>.json` 笔记文件。
+- 默认位置：`$DSH_HOME/storages/dsh-session-notebook/`；未设置 `DSH_HOME` 时用 `~/.dsh/`。
+- 插件配置 `storageFile` 可指定规范绝对路径；不读取其他插件数据。
+- **多进程可打开同一库**：Web 与桌面端可同时读写。进程只在加载快照、刷新、提交清单和回收文件期间短暂取得目录锁；冲突的请求等待锁释放，最多等待 5 秒。每个存储目录有 `.dsh-session-notebook.owner`，确保一个 `data/` 目录只属于一个清单文件。
+- 元数据是唯一提交点：变更笔记先写入 `data/.pending-<pid>-<uuid>/`，再在锁内重读清单并校验 `epoch` / `revision`，通过后才将 UUID 文件提升到 `data/` 并原子替换元数据。过期快照返回版本冲突，不覆盖其他进程的提交。成功后回收不再引用的 UUID 文件；冲突会清理本次暂存文件。下次打开时只清理可确认进程已退出的暂存目录。损坏或缺失已引用 data 时停写，不把故障库当空库。
+- 读取接口会在短时锁内刷新当前快照。非正常退出若发生在磁盘操作期间，锁标记可能残留；插件不会自动删除无法确认所有者状态的标记，需先核实所有进程已停止，再按恢复流程处理。
+- 预算：有效元数据与引用 data 总计 50 MiB；收据最多 100000 条、最多 16 MiB，超限拒绝新修改。
+
+## 能力边界与限制
+
+当前允许同一台机器上的 Web 与 Desktop Host 同时打开同一个本地笔记库。每个进程分别维护内存快照；提交时通过短时目录锁串行更新清单，并用 `epoch` / `revision` 检测过期写入。若两个进程同时修改，后提交的一方可能收到版本冲突，需要刷新后重新执行操作；插件不会自动合并两边的编辑。
+
+以下能力**尚未提供**，界面与交付说明中会显式标注：
+
+- 不支持跨设备、多机共享目录或网络文件系统上的一致性保证；锁机制面向同一台机器的本地文件系统。
+- 不同 `storageFile` 不得指向同一个 `data/` 目录；存储目录中的 `.dsh-session-notebook.owner` 用于检测并拒绝这种配置。
+- 锁文件若因进程异常退出而残留，插件不会自动删除状态不确定的锁；确认所有相关 Host 已退出后再按恢复流程处理。
+- 不支持损坏库的应用内受控恢复与自动故障接管；JSON 备份导出不等于保护原始损坏介质。
+- 不支持自动 Schema 迁移；不宣称支持无限库容量（业务仍在内存中组装完整 Snapshot）。
+- 应用内 JSON 恢复尚未开放。
+- Web 端已由用户确认完成验收；本仓库没有对应 `0.1.0` 包的逐项现场验收记录，不能将此前结果当作该版本在每个 Web Profile 的运行证明。
+
+当前范围与后续能力（受控恢复、迁移、跨 Host 排他及版本化 Web 回归等）见[现行设计](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/DESIGN.md#8-验收与后续事项)；不可将后续目标表述为本版已交付。
+
+## 开发检查
+
+```bash
+npm run check            # Client 产物一致性 + 发布入口语法
+npm test                 # 单元测试（node:test）
+npm run test:integration # 隔离介质下的 Host 保存/重开集成测试
+npm run test:runtime     # 真实 Cordis Context 下的加载/卸载运行时测试
+npm run pack:check       # 打包清单核对
+git diff --check
+```
+
+运行 `npm run test:runtime` 前先 `npm ci --prefix tests/runtime` 准备隔离运行时依赖。部分单测直接校验目标 SDK 源码，需要本地 `.sdk-reference/`（对应 `@deepseek-ai/cordis@4.0.4`、`@deepseek-ai/dsh-client-connection@0.2.0-rc.2` 等同版本官方包解压内容）。SDK 参考、运行时依赖与测试产物均不提交、不入包。
+
+这些本地测试**不替代**真实 Desktop 网络、浏览器绘制与全流程验收。
 
 ## 文档
 
-- [第一版可靠 MVP：收敛开发计划（当前执行主线）](<docs/FIRST_MVP_PLAN.md>)
-- [产品功能文档](<docs/PRODUCT_REQUIREMENTS.md>)
-- [技术设计与逐步开发验证指南](<docs/DEVELOPMENT_GUIDE.md>)
-- [交互原型](<docs/UI_PROTOTYPE.html>)
-- [开发上下文索引](<docs/developer/llms.txt>)
+以下为仓库文档，`docs/` 与 `AGENTS.md` 不进入 npm 包；在解包目录阅读时请访问仓库链接：
 
-0.0.22 为全部 Markdown 下载和 JSON 备份文件增加本地时间后缀 `YYYYMMDDHHmmss`。编辑笔记的标签使用复选框，可直接多选，最多 10 个。JSON 保留完整数据；Markdown 用于阅读和分享。应用内 JSON 恢复尚未开放。
+- [当前产品与技术设计](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/DESIGN.md) · [文档总导航](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/README.md)
+- [开发者索引](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/developer/llms.txt) · [架构速览](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/developer/architecture.md)
+- [交互原型](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/UI_PROTOTYPE.html)（历史草图） · [兼容事故与测试摘要](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/evidence/compatibility-and-tests.md)
+- [证据索引](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/evidence/README.md) · [开发与发布约束](https://github.com/timestatic/dsh-session-notebook/blob/main/AGENTS.md)
 
-0.0.23 修复空临时选区重新选择时浮窗位置与引用不更新的问题。已有批注、标签编辑与待确认保存请求继续绑定原选区。
+## 当前状态与验收边界
 
-此前 `0.0.25` 工作区还包含侧栏布局、筛选、卡片操作和编辑标签的调整，以及仅选择标签时关闭未保存草稿的确认保护。`npm run check` 会校验生成的 Client 与模板一致。本地测试与打包检查只验证工作区文件；本次版本仍待真实 Desktop 验收。
+`0.1.0` 的工作区源码接入了专属文件存储与笔记业务路由，支持会话正文选区保存与文本锚点高亮。**Web 端验收已由用户确认完成**；本仓库未记录该次验收的具体包版本、场景清单和 HTTP 证据，因此不推断 `0.1.0` 新包已在 Web 安装、启用或逐项通过。发布前重新核对源码、隔离介质、打包与新包内容。
 
-`0.0.26` 针对 DSH 0.2.0-rc.2 Web 进行源码适配与打包准备：独占库 fail-fast、来源会话 Host list 判定及相应回归。尚未通过官方 manager 安装到 Web，真实页面功能待验收。见[Web 兼容记录](<docs/evidence/web-compat-0.0.26.md>)。
+**尚未完成**：没有在本轮对 `0.1.0` 新包执行 Web/Desktop 安装、启停或重启。Desktop 新功能仍需真实保存、重启读回、选区与重新挂载验收；Web 上线后也应核对实际版本和宿主 Gateway、认证。旧加载 / 连接 / 主题 / 键盘与 Gateway 结果及适用范围汇总于[兼容事故与测试摘要](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/evidence/compatibility-and-tests.md)，文件存储决策见[轻量文件存储与划线接入](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/evidence/lightweight-notebook-0.0.16.md)。
+
+逐版本开发日志已从工作树裁剪；关键事故、设计和验收边界见[证据索引](https://github.com/timestatic/dsh-session-notebook/blob/main/docs/evidence/README.md)，原始过程记录可查 Git 历史。

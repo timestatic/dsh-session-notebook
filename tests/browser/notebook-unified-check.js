@@ -139,11 +139,13 @@ async page => {
   await toolbar.getByRole('button', { name: '记笔记', exact: true }).click();
   await toolbar.locator('textarea').fill('Do not lose typed annotation');
   await toolbar.getByRole('button', { name: '添加标签', exact: true }).click();
-  await toolbar.getByRole('button', { name: 'TODO', exact: true }).click();
-  check(await toolbar.locator('textarea').inputValue() === 'Do not lose typed annotation', 'quick tag retains body');
+  await toolbar.locator('[data-annotation-tag-picker]').getByRole('checkbox', { name: 'TODO' }).check();
+  await toolbar.getByRole('button', { name: '记笔记', exact: true }).click();
+  check(await toolbar.locator('textarea').inputValue() === 'Do not lose typed annotation', 'tag selection retains body');
   await toolbar.getByRole('button', { name: '取消选区操作', exact: true }).click();
   await toolbar.getByRole('button', { name: '继续编辑', exact: true }).click();
-  await toolbar.getByRole('button', { name: '保存笔记', exact: true }).click();
+  await toolbar.getByRole('button', { name: '添加标签', exact: true }).click();
+  await toolbar.locator('[data-annotation-actions]').getByRole('button', { name: '保存笔记', exact: true }).click();
   await toolbar.waitFor({ state: 'detached' });
   check(await page.evaluate(() => { const p = window.fixtureCalls.filter(x => x.method.endsWith('/notes/excerpt')).at(-1).payload; return p.kind === 'note' && p.bodyMarkdown === 'Do not lose typed annotation' && p.tagIds.includes('builtin_todo'); }), 'combined body/tag save');
   await nav.getByRole('button', { name: '笔记库', exact: true }).click();

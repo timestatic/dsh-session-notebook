@@ -85,3 +85,62 @@ git diff --check
 - 禁止把反复运行测试产生的目录当作无成本输出。新增或修改落盘测试时，核对 `finally` 清理、临时目录路径约束、单次和重复运行后的磁盘占用；压测或大样本基准不得无上限自动累积，计划暂缓的性能专项不得混入日常门禁来制造大量产物。
 - 曾因测试未清理而在 `.storage-test-output/` 累积约 9,799 个顶层目录、76 GB 数据。修复不能只删除一次产物：还须修复生成它们的测试，重新运行定向测试，并确认残留目录和磁盘占用。2026-10-05 已清理该目录，相关高频与大文件用例已加入运行后清理；其他用例若仍留少量产物，也须逐步按此规则收敛。
 - **删除前先核实**解析后的绝对路径恰为本仓库 `.storage-test-output/`、目标不是符号链接、内容属于测试输出且没有活动写入；不要对未核实的计算路径或可能包含用户数据的目录执行递归删除。清理整目录须有用户明确授权；删除后检查结果。不得触碰 Desktop/Profile 存储介质。
+
+## 9. 打包、分发与安装流程（唯一权威路径）
+
+本节是本项目作为 DeepSeek Harness（DSH）插件的打包与安装权威说明。任何“如何发布/安装”的回答都必须与此一致，不得虚构 npm 发布、私有 registry 或手工 Profile 步骤。
+
+### 9.1 产物形态与构建
+
+- 插件是**常驻 npm Bundle**：`package.json` 的 `dsh.bundle.patch` 指向 `cordis.patch.yml`，`dsh.client` 声明 `platform: web`、`immediately: true` 与 `inject` 激活依赖；Host 入口 `src/host/index.js`，Client 入口 `src/client/index.js`。
+- **直接发布 JS 源码，无编译/lint/typecheck 步骤。** Client 由 `scripts/build-client.mjs` 从 `src/client/index.template.js` 内联生成 `src/client/index.js`（把 `preview-api`、`manual-save-controller`、schema、备份、锚点等 ESM 模块拼进模板 marker）。改模板或任一被内联模块后必须重新生成，`npm run check` 会用 `--check` 校验产物与模板一致（不一致报 `CLIENT_BUNDLE_STALE`）。
+- `package.json` 的 `files` 白名单决定入包内容，只含 Host/Client 源码、`locale/*.json`、`icon.svg`、`cordis.patch.yml`、`README.md`。测试、`docs/`、`.sdk-reference/`、诊断与测试产物**不入包**（见 `.gitignore`）。
+
+### 9.2 打包命令
+
+```bash
+npm run check        # 生成/校验 Client 产物 + 全部发布入口语法检查
+npm test             # 单元测试（node:test）
+npm run pack:check   # npm pack --dry-run --ignore-scripts，核对 tarball 清单
+npm pack --ignore-scripts   # 生成可分发 timestatic-dsh-session-notebook-<version>.tgz
+git diff --check
+```
+
+- 发布前逐项检查退出码（§5 门禁）。`pack:check` 只核对清单，不安装。
+- 打 `.tgz` 前确认版本号已在 `package.json`、`src/client/index.template.js` 的 `version` 常量、生成后的 `src/client/index.js` 与 `README.md` **四处同步**（§5）。
+- `--ignore-scripts` 必带，避免在打包/安装阶段执行生命周期脚本。
+- npm 默认缓存无权限时用可写临时 `npm_config_cache`，不得 sudo/chown 全局缓存。
+
+### 9.3 发布到 npm registry
+
+- npm 发布名为作用域形式 **`@timestatic/dsh-session-notebook`**；`package.json` 已含 `publishConfig.access: public`（作用域包默认 restricted，缺它 `npm publish` 失败）。裸 `timestatic/dsh-session-notebook` **不是合法 npm 名**：plugin-manager 的 `PACKAGE_NAME` 正则 `^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$` 只接受可选 `@scope/` 前缀加单段名，中段 `/` 会被 `parseInstallSpec` 判为 `not a package name the registry accepts`。
+- **改名耦合（硬性）**：`cordis.patch.yml` 的 bundle row `name` 是 Cordis 加载 Host 的模块标识符，plugin-manager 按包名解析 bundle（`bundleManifest`），故 row `name` 必须等于 npm 包名；改包名必须同步改它，否则模块解析失败。`package-lock.json` 顶层与 `packages[""]` 的 `name`、以及断言包名的测试（`tests/unit/loading.test.js`）也需同步。
+- **内部标识不随包名变（硬性）**：Client factory `id`、locale/RPC `namespace`、slot id 前缀、Host 存储目录 `storages/dsh-session-notebook/` 保持非作用域 `dsh-session-notebook`。RPC 方法名是单段 `dsh-session-notebook/<endpoint>`（见 §1、§2 通道语法约束），改成含 `@`/`/` 的作用域形式会破坏通道契约；改存储目录会孤立既有用户数据。改包名时**不得**顺手改这些内部标识。
+- 发布是外部不可逆动作（同版本号不能重发），需授权后由用户执行；不得代用户 `npm publish`。显式指定目标 registry，避免默认配置指向镜像。`npm view` 返回 404 只能说明该 registry 未找到版本或当前身份无访问权限，不能证明发布权限：
+
+```bash
+npm view @timestatic/dsh-session-notebook@0.0.36 version --registry=https://registry.npmjs.org
+npm login --registry=https://registry.npmjs.org     # 核对 @timestatic 的发布权限
+npm publish --dry-run --ignore-scripts --registry=https://registry.npmjs.org
+# 核对内容、版本、账户与单独授权后由用户执行：
+npm publish --ignore-scripts --registry=https://registry.npmjs.org
+```
+
+- 安装 spec：`dsh plugin --profile <profile> add @timestatic/dsh-session-notebook@<version>`；也支持绝对路径、git（`github:timestatic/dsh-session-notebook`）与 tarball。registry 解析经 `pnpm view`，顺序为 `options.registry` → 配置 `registry` → `fallbackRegistries`（默认含 `https://registry.npmmirror.com/`）。
+- 可选：声明 DSH runtime `peerDependencies` 以启用 plugin-manager 安装前的兼容性检查；但 peer 包名与版本范围必须用已核实的真实值，不得臆造（§2）。当前仓库尚未取得确切 peer 依赖对，暂不声明。
+
+### 9.4 安装 / 启用 / 卸载（仅通过官方 plugin_manager）
+
+安装、启用、禁用、重启、Profile 变更都是**需单独授权**的动作（§5、§6）。取得授权后：
+
+1. `list_bundles` 确认当前 Profile 已装版本与 `enabled` 状态，核对唯一目标 Profile。
+2. `install_bundle` 安装工作区本地 `.tgz` 或指定 registry（历史用 `https://registry.npmjs.org`）；**不得传空 registry 字符串**（会 `application=failed`）。
+3. 读取返回的 `packageResult.exitCode`、`changed`、`application`、`warnings`：`restart-required` 必须完整退出 Desktop 再重开；`applied` 才可继续。peer dependency warning 不得当作兼容性通过或擅自设版本豁免。
+4. `set_bundle enabled=true/false` 切换启用；读取 `changed`/`application`/`warnings`。
+5. 再次 `list_bundles` 核实版本、`installed`、`enabled`；不得凭源码文件变化声称运行时已更新。
+
+**硬性禁止**：手工编辑 Profile 的 `package.json`/`cordis.patch.yml`、在 Profile 内运行 pnpm/npm、删除插件数据、启动第二套宿主、用假端点或手改 bundles 绕过管理器。旧 Web（如 3080，DSH 0.1.5-rc.1）可能未挂载管理 Remote（`/api/pluginManager/listBundles` 返回 404），此时**不得**改用手工 Profile 或旧 CLI pnpm 转发；只能在具备官方管理工具的 Host 上安装，或如实报告“无满足约束的持久安装入口”。
+
+### 9.5 安装后验收边界
+
+安装成功（exitCode 0 / Slot 注册成功）**不等于**功能通过。宣称任何端“已安装可用”前，必须按 §6 取得真实运行时证据：Desktop welcome 正常、`POST /api/settings/describe` 200、Notebook 显示预期版本、health/list 经独立 RPC 通道返回正确结构、禁用后官方 Gateway 仍工作、未认证访问仍被拒绝。无真实 Desktop/浏览器访问能力时，只能报告“源码 / 打包 / 本地测试通过，待运行时验收”，并分项标注安装、启用、重启、实际通信状态（未操作项填 NOT RUN）。

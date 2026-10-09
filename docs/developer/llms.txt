@@ -1,60 +1,27 @@
-# DSH Session Notebook：开发上下文索引
+# dsh-session-notebook · 开发者索引
 
-当前执行主线（2026-10-05）：[第一版可靠 MVP 收敛计划](<../FIRST_MVP_PLAN.md>)。按手工保存、摘录高亮、笔记库管理、文件与可靠性收尾推进；复用已有业务模块，停止新增自建锁、worker、SQLite 与超大库专项。本索引其余历史 Step 说明作参考，不能覆盖新计划。产品语义与 AGENTS.md 安全边界继续生效。
+> 2026-10-09 工作区源码版本 0.0.36；此处不代表已在 Desktop 安装或验收。文档总入口：[docs/README.md](../README.md)，现行设计：[DESIGN.md](../DESIGN.md)，架构速览：[architecture.md](./architecture.md)。
 
-## 项目概况
-- 本地优先的 DSH AI 会话笔记插件；当前优先 Desktop，独立 Web 暂缓，范围以指南顶部调整为准。
-- 当前版本 0.0.12，零依赖 Host/Client JS 加载与通信 Spike。Desktop 已有正式安装与手动 UI/网络验收记录，尚无笔记存储或保存。剩余步骤见[Desktop 门禁矩阵](<../evidence/desktop-step-0-2-gate.md>)。
-- 本索引记录方案与真实仓库状态，不表示实现已完成。
+## 项目与技术栈
+- DeepSeek Harness 本地会话笔记 npm Bundle，Desktop 优先、独立 Web 未验收；Host + Web Client 共存于插件包。
+- ESM JavaScript、Node.js >=22、node:test、宿主提供 React/Cordis/连接/Slot；根 `package.json` 无外部依赖或编译、lint、typecheck 步骤。
+- 不注册共享 `/api` interceptor；精确 Notebook 路由与官方 Gateway 共存，认证继承宿主公开 admission。Client 使用 `ctx.connection.rpc.call`，不走 global fetch。
 
-## 阅读顺序
-1. [产品需求](<../PRODUCT_REQUIREMENTS.md>)：产品边界、FR/NFR、领域模型与 AC-001 至 AC-023。
-2. [开发指南](<../DEVELOPMENT_GUIDE.md>)：实际 DSH 接缝检查、架构、数据可靠性、Step 0–15 实现验证与发布门禁。
-3. [交互原型](<../UI_PROTOTYPE.html>)：演示 UI，不连接真实 DSH。
+## 代码地图
+- `package.json`、`cordis.patch.yml`：Bundle manifest、激活依赖及 Host 插入。
+- `src/host/index.js` → `src/host/manual-runtime.js` → `src/host/preview-routes.js`：生命周期、存储初始化、精确业务 POST RPC。
+- `src/host/json-store.js`、`src/snapshot-coordinator.js`：元数据+不可变笔记文件、提交与冲突/收据；业务见 `src/manual-notebook-service.js`、`src/note-domain.js`、`src/tag-domain.js`。
+- `src/client/index.template.js`、`src/client/preview-api.js`：UI 与 RPC adapter；`scripts/build-client.mjs` 生成发布入口 `src/client/index.js`。
+- `src/client/conversation-annotations.js`、`src/client/message-text-index.js`、`src/client/text-anchor.js`：会话选区、索引与高亮。
+- `src/query.js`、`src/markdown-export.js`、`src/json-backup.js`：检索、阅读导出与完整备份格式。
+- `tests/unit/`、`tests/integration/`、`tests/runtime/`、`tests/e2e/`：不同层级，模拟/隔离测试不等于 Desktop 实机验收。
 
-## 技术方案
-- 建议 TypeScript、共享 Schema、React Client、Host NotebookService、DSH Storage Domain。
-- React 由 DSH Client 模块表提供；不得捆绑第二份 React 或依赖 Harness 内部 Client UI 组件包。
-- Storage Domain API 已发现，但底层原子性、耐久性、跨 Host 排他尚未验证。
-- Markdown 字符串是内容；结构化 Snapshot 是权威存储；Markdown 导出不是双向同步。
-- 不使用独立 SQLite、逐笔记 Markdown 文件、MCP 或 Agent Tools 作为 MVP 依赖。
+## 开发与发布
+- `npm run build:client`：修改模板或内联模块后重新生成 Client；`npm run check` 只检查产物一致性与 JavaScript 语法。
+- `npm test`：单测；`npm run test:integration`：隔离业务往返；`npm run test:runtime`：Cordis 运行时（需先准备 `tests/runtime` 依赖）；`npm run pack:check`：发布清单 dry-run；`git diff --check`。
+- 单测可能需要对应版本的本地 `.sdk-reference/`；文档和测试不入包。打包、安装、权限、Gateway 共存和实机准出规则以 [AGENTS.md](../../AGENTS.md) §1–§9 为准。未经授权不要安装、启用、重启或修改 Profile。
 
-## 架构与重要流程
-- Client：选区捕获、引用映射、临时高亮、面板、草稿；不直接读写本地存储介质。
-- Host：入参校验、版本冲突、幂等、候选快照整体提交、来源查询、导出与备份。
-- 所有笔记全局可见；session/workspace 只是 source 查询过滤器，不存在 scope 字段。
-- Quote 原文只读；bodyMarkdown 可编辑；Anchor 独立保存，不持久化 normalizedText。
-- TODO 是普通稳定 Tag ID，不是任务状态。
-- 实现顺序：能力验证 → Desktop 加载与通信门禁 → 存储门禁 → 最小保存 → 选区引用 → 高亮编辑 → 标签搜索 → 回链 → 导出备份 → 故障与发布测试。
-
-## 构建、测试、安装
-- 当前已验证 npm run check（JS 语法）、npm test / test:unit（40 项通信、生命周期及诊断测试）、npm run pack:check（发布 dry run）。尚无 build、lint、typecheck、integration、e2e 脚本，不猜测运行。
-- 拟建脚本合同详见开发指南第 7 节；最终命令必须随工程创建并根据真实工具链固定。
-- 安装工作区 Bundle 使用授权的 plugin_manager.install_bundle，不手工修改 Profile 配置。
-- 通过 cordis_inspect_list/query 获取实际 Service、Slot、Config 与事件合同；接口存在不等于测试通过。
-- Web 当前页面地址由运行环境决定；不要启动另一套 Vite 页面替代真实 DSH。
-
-## 实施前最高优先级
-- 后端存储原子/耐久/失败缓存、单存储多 Host 排他。
-- 持久 Bundle 的通信及 Remote 构建流程。
-- 右侧 Tab 创建/注册、用户与 Assistant 消息身份、原始 Markdown 块及局部映射。
-- Desktop 独立加载、来源导航、复制、下载与重启持久化。
-
-## 已确认产品规则（PRD v1.0 / Approved）
-- Markdown 文本编辑 + 预览切换；持久 note 必须有非空 Quote 与正文，空草稿不落库，转换保存成功才改类型。
-- 默认引用上限 8,000 Unicode 码点，超限阻止保存并保留选区，禁止静默截断。
-- 标签显示名 trim；名称键 NFKC + trim + locale-independent toLowerCase，冲突不自动合并。
-- 普通删除必入回收站，无自动清空；永久删除单独确认。
-- FR-104A 完整 JSON 受控整库恢复为 MVP，FR-104B 通用增量导入/合并为 P1；恢复先保护原介质，再整体提交，旧写 token 必须失效。
-- 写入当前输入框为 MVP：确认追加/替换最新草稿，不自动发送。整条消息/Tool/颜色编辑等为后续。
-- 目标 DSH 版本以 Phase 0 双端实测基线为准；PRD 已按用户反馈的评审通过结论标记需求准出；不代表宿主能力、实现测试或发布验收通过。
-
-## 社区代码参考
-- [开发指南第 11 节](<../DEVELOPMENT_GUIDE.md#11-社区项目代码参考dsh-plugin-session-notes>)分析 iptton-ai/dsh-plugin-session-notes，固定提交 5f4ca2a268d4e24c2ab0ca662b4f5bdb54690b95。
-- 可参考 Anchor 上下文桥接、gapBetween/foldWs 文本索引、CSS Highlight Range/点击命中、Tab/fallback 复用与生命周期清理。
-- 区分 src 动态 RPC 与 lib 常驻 fetch；不能照搬裸文件存储、full-access/shell fallback、首文本命中、空白折叠保存、mark DOM 兜底或失败关闭草稿。
-- 当前 header utilities Slot 已补查存在；上游 sidebarRightTabs/sidebarRight 调用仍需当前宿主类型与实验核实。
-- 引入上游代码须遵守 MIT 版权/许可证；源码分析不代表运行验证，新增 REF-01 至 REF-12 回归用例。
-
-## 更新规则
-工程落地后用实际目录、依赖版本、命令、测试结果更新本索引；未执行的测试保持 NOT RUN，不能把方案写成事实。
+## 阅读路线
+1. [当前产品与技术设计](../DESIGN.md) → [架构速览](./architecture.md) → [开发约束](../../AGENTS.md) → [根 README](../../README.md)。
+2. [兼容与测试摘要](../evidence/compatibility-and-tests.md)、[证据索引](../evidence/README.md) 用于追溯宿主事故；历史 PRD/计划/开发指南已整合入 DESIGN.md，旧版本原文可在 Git 历史查询。
+3. [UI 原型](../UI_PROTOTYPE.html) 只作交互草图；旧 Storage Domain/共享 interceptor 方案不得直接复用。

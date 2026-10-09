@@ -40,6 +40,8 @@ export function conversationAnnotations({ document, sessionId, readBodies, api, 
       if (!matches.length) return { id: note.id, status: 'unloaded-or-changed' };
       try {
         const range = matches[0].index.range(matches[0].result.startOffset, matches[0].result.endOffset);
+        if (typeof range.getClientRects === 'function' && !range.getClientRects().length)
+          return { id: note.id, status: 'unloaded-or-changed' };
         ranges.push(range); located.push({ id: note.id, range, index: matches[0].index, exact: note.anchor.exact });
         return { id: note.id, status: typeof Highlight === 'function' && registry ? 'found' : 'highlight-unavailable' };
       } catch { return { id: note.id, status: 'unloaded-or-changed' }; }
@@ -102,15 +104,20 @@ export function conversationAnnotations({ document, sessionId, readBodies, api, 
     if (Array.from(body.querySelectorAll?.(excluded) ?? []).some(node => range.intersectsNode(node))) return;
     const exact = selection.toString();
     if ([...exact].filter(point => !/\s/u.test(point)).length < 2 || [...exact].length > 8000) return;
+    const rect = range.getBoundingClientRect();
+    const draft = { quote: { format: 'plain_text', content: exact }, source: { ...source, sessionId },
+      position: { left: rect.left, top: rect.bottom } };
     try {
       const indexed = messageTextIndex(body).selection(range, exact);
-      const rect = range.getBoundingClientRect();
-      publish({ draft: { quote: { format: 'plain_text', content: exact },
-        anchor: { exact, prefix: indexed.sourceText.slice(Math.max(0, indexed.startOffset - 32), indexed.startOffset),
+      publish({ draft: { ...draft, anchor: { exact,
+        prefix: indexed.sourceText.slice(Math.max(0, indexed.startOffset - 32), indexed.startOffset),
           suffix: indexed.sourceText.slice(indexed.endOffset, indexed.endOffset + 32),
-          startOffset: indexed.startOffset, endOffset: indexed.endOffset }, source: { ...source, sessionId },
-        position: { left: rect.left, top: rect.bottom } }, diagnostic: null });
-    } catch { publish({ diagnostic: 'UNMAPPABLE_RANGE' }); }
+          ...(indexed.normalized ? {} : { startOffset: indexed.startOffset, endOffset: indexed.endOffset }) } }, diagnostic: null });
+    } catch (failure) {
+      if (failure?.code === 'UNMAPPABLE_RANGE')
+        publish({ draft: { ...draft, anchor: { exact }, unlocated: true }, diagnostic: null });
+      else publish({ diagnostic: failure?.code ?? 'UNMAPPABLE_RANGE' });
+    }
   };
   const save = async (kind, bodyMarkdown = state.bodyMarkdown ?? '') => {
     // Every save action preserves typed annotations, including quick-tag shortcuts.

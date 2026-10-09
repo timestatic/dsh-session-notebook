@@ -1,5 +1,5 @@
-// Pending Client save flow, not installed in the Phase 0 UI. Host remains the
-// sole authority; a transport failure MUST preserve the same intent for retry.
+// Client save flow. Host remains the sole authority; a transport failure
+// MUST preserve the same intent for retry.
 const failure = code => Object.assign(new Error(code), { code });
 const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 const MAX_TITLE_CODEPOINTS = 1000;

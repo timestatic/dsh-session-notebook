@@ -251,7 +251,8 @@ async function harness(ready = true, { loseFirstTagReply = false, loseFirstNoteR
         items: page.map(item => ({ ...item, quoteFormat: item.quote?.format ?? null,
           quoteExcerpt: item.quote?.content ?? '' })),
         selectedVisibleIds: [], hiddenSelectedCount: 0,
-        tags: tags.map(tag => ({ id: tag.id, name: tag.name, active: tag.id === 't1' ? 30 : 0, trashed: 0 })) } };
+        tags: tags.map(tag => ({ id: tag.id, name: tag.name, active: tag.id === 't1' ? 30 : 0,
+          trashed: noteRows.filter(item => !!item.deletedAt && item.tagIds.includes(tag.id)).length })) } };
     }
     if (method === 'dsh-session-notebook/markdown/export') {
       const picked = payload.ids.map(id => noteRows.find(item => item.id === id));
@@ -439,6 +440,24 @@ test('trash detail remains readable while edit and export actions stay hidden', 
   assert.match(JSON.stringify(detail), /libraryDeletedAt: /);
   assert.match(JSON.stringify(detail), /原文 n0/);
   ui.dispose();
+});
+
+test('tag filter counts use active notes in the library and deleted notes in trash', async () => {
+  const live = await harness();
+  live.status(); await flush(); live.launcher().children[0].props.onClick();
+  live.library(); await flush();
+  assert.equal(tagFilter(live.library(), 't1').children.at(-1), 'TODO · 30');
+  live.dispose();
+
+  const trash = await harness(true, { trashMode: true });
+  trash.noteRows[0].deletedAt = '2026-10-05T02:00:00Z';
+  trash.status(); await flush(); trash.launcher().children[0].props.onClick();
+  trash.library(); await flush();
+  assert.equal(tagFilter(trash.library(), 't1').children.at(-1), 'TODO · 1');
+  assert.equal(tagFilter(trash.library(), 't2').children.at(-1), '重要 · 0');
+  tagFilter(trash.library(), 't1').props.onClick(); await flush();
+  assert.equal(tagFilter(trash.library(), 't1').children.at(-1), 'TODO · 1');
+  trash.dispose();
 });
 
 test('closing a pending detail ignores a late Host response', async () => {

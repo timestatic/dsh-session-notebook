@@ -13,6 +13,8 @@ const handlers = { 'notes/anchors': 'anchors', 'notes/excerpt': 'excerpt', 'manu
   'backups/finish': 'backupFinish', 'backups/preview': 'backupPreview',
   'backups/cancel': 'backupCancel' };
 const paths = Object.keys(handlers);
+const mutating = new Set(['notes/excerpt', 'manual/create', 'manual/update', 'tags/create',
+  'tags/rename', 'tags/merge', 'tags/delete', 'notes/apply', 'notes/edit', 'notes/convert']);
 const diagnostic = new Set(['VALIDATION_FAILED', 'VERSION_CONFLICT', 'EPOCH_CONFLICT',
   'COMMIT_UNKNOWN', 'READ_UNAVAILABLE', 'SNAPSHOT_LIMIT', 'REQUEST_LIMIT',
   'RECEIPT_LIMIT', 'REQUEST_ID_REUSED', 'CLOSED', 'NAME_CONFLICT', 'CONFIRM_REQUIRED',
@@ -84,6 +86,7 @@ export function registerPreviewRoutes(ctx, service) {
             if ((['manual/backup', 'tags/list'].includes(endpoint) && Object.keys(body.payload).length)
               || (['manual/get', 'notes/get'].includes(endpoint) && (Object.keys(body.payload).length !== 1
                 || !own(body.payload, 'id')))) return envelope(rpcId, failure('VALIDATION_FAILED'));
+            if (!mutating.has(endpoint)) await service.refresh?.();
             const value = endpoint === 'manual/backup' ? service.exportJson()
               : endpoint === 'tags/list' ? service.tagList()
               : endpoint === 'manual/get' ? service.get(body.payload.id)

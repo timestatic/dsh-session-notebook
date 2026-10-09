@@ -33,8 +33,9 @@ export const apply = (ctx, config = {}) => {
             return new Response('unauthorized', { status: admitted?.rejection === 403 ? 403 : 401, headers });
         }
         const value = endpoint === 'health' && runtime
-          ? (() => { try { runtime.service.list(); return { status: 'ok', phase: 1, storageReady: true }; }
-            catch { return { ...fallback, diagnostic: 'READ_UNAVAILABLE' }; } })()
+          ? await runtime.service.refresh().then(() => {
+            runtime.service.list(); return { status: 'ok', phase: 1, storageReady: true };
+          }).catch(() => ({ ...fallback, diagnostic: 'READ_UNAVAILABLE' }))
           : endpoint === 'health' && storageDiagnostic ? { ...fallback, diagnostic: storageDiagnostic } : fallback;
         if (request.method === 'GET') return Response.json(value, { headers });
         if (request.method !== 'POST') return new Response('not found', { status: 404, headers });

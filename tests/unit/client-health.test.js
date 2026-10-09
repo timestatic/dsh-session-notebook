@@ -42,8 +42,8 @@ async function harness(fetcher, rpcCall) {
   const status = panel.children.at(-1).type;
   const mountStatus = () => { status(); return effects.shift()(); };
   const cleanup = mountStatus();
-  const phaseNotice = () => panel.children[1].type();
-  return { states, timers, cleanup, mountStatus, phaseNotice };
+  const versionLabel = () => panel.children.find(child => child.type?.name === 'VersionLabel').type();
+  return { states, timers, cleanup, mountStatus, versionLabel };
 }
 
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
@@ -145,7 +145,7 @@ test('a remounted health timeout revokes shared storage readiness from an earlie
   });
   await flush();
   assert.equal(h.states.at(-1), 'ready');
-  assert.equal(h.phaseNotice(), null);
+  assert.match(h.versionLabel().children[0], /^v\d+\.\d+\.\d+$/);
   h.cleanup();
   responsive = false;
   const cleanup = h.mountStatus();
@@ -154,7 +154,7 @@ test('a remounted health timeout revokes shared storage readiness from an earlie
     await flush();
     assert.equal(h.states.at(-1), 'failed');
     assert.equal(h.states.includes('TIMEOUT'), true);
-    assert.equal(h.phaseNotice().children[0], 'empty');
+    assert.match(h.versionLabel().children[0], /^v\d+\.\d+\.\d+$/);
   } finally { cleanup(); }
 });
 

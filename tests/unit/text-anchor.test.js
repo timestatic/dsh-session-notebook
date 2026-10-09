@@ -61,3 +61,12 @@ test('malformed offsets and contexts fail closed', () => {
   assert.deepEqual(locateTextAnchor(text, { exact: '😀', startOffset: 2, endOffset: 4 }),
     { status: 'found', startOffset: 2, endOffset: 4, match: 'unique' });
 });
+
+test('selection line breaks locate a unique rendered paragraph and refuse ambiguous folds', () => {
+  assert.deepEqual(locateTextAnchor('甲段\n\n乙段', { exact: '甲段\n乙段', prefix: '', suffix: '' }),
+    { status: 'found', startOffset: 0, endOffset: 6, match: 'folded-context' });
+  assert.deepEqual(locateTextAnchor('甲段\n\n乙段。甲段\n\n乙段', { exact: '甲段\n乙段' }),
+    { status: 'ambiguous' });
+  assert.deepEqual(locateTextAnchor('甲段\n\n乙段', { exact: '甲段\n错字' }),
+    { status: 'missing' });
+});

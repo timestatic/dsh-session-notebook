@@ -7,12 +7,12 @@ const root = new URL('../../', import.meta.url);
 
 test('manifest ships all declared entry points and metadata', async () => {
   const manifest = JSON.parse(await readFile(new URL('package.json', root), 'utf8'));
-  assert.equal(manifest.name, 'dsh-session-notebook');
+  assert.equal(manifest.name, '@timestatic/dsh-session-notebook');
   assert.equal(manifest.dsh.client.platform, 'web');
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml');
   assert.equal(manifest.dependencies, undefined);
   const lock = JSON.parse(await readFile(new URL('package-lock.json', root), 'utf8'));
-  assert.match(manifest.version, /^0\.0\.\d+$/);
+  assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
   assert.equal(lock.version, manifest.version);
   assert.equal(lock.packages[''].version, manifest.version);
   for (const helper of ['selection-draft', 'quote', 'text-anchor', 'rewrite-draft']) {
@@ -38,7 +38,8 @@ test('client factory is lazy and registers disposable independent slots', async 
   let imports = 0;
   const sandbox = createContext({ window: { __ModuleLoader__: { load: value => { definition = value; } } } });
   new Script(await readFile(new URL('src/client/index.js', root), 'utf8')).runInContext(sandbox);
-  assert.equal(definition.id, 'dsh-session-notebook');
+  const manifest = JSON.parse(await readFile(new URL('package.json', root), 'utf8'));
+  assert.equal(definition.id, manifest.name, 'Host resolves the Client factory by the installed package name');
   assert.equal(imports, 0);
   const plugin = definition.factory(name => { assert.equal(name, 'react'); imports++; return {}; });
   assert.equal(imports, 1);

@@ -1,8 +1,9 @@
 {
-  "name": "dsh-session-notebook",
-  "version": "0.0.36",
-  "private": true,
+  "name": "@timestatic/dsh-session-notebook",
+  "version": "0.1.0",
   "description": "Capture notes from conversations, organize and search with tags, and manage edits, trash, and backups.",
+  "repository": { "type": "git", "url": "git+https://github.com/timestatic/dsh-session-notebook.git" },
+  "publishConfig": { "access": "public" },
   "type": "module",
   "engines": { "node": ">=22" },
   "exports": {

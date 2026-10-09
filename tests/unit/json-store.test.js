@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -63,7 +64,8 @@ test('creates private manifest/data and reopens assembled snapshot with defensiv
 test('one changed note writes one data file; unchanged references remain stable; old reference is reclaimed', async () => fixture(async ({ data, manifest, open }) => {
   const written = [];
   const fsImpl = { ...fs, async open(path, ...args) {
-    if (dirname(path) === data && path.endsWith('.json')) written.push(path);
+    if (path.includes('.pending-') && path.endsWith('.json')
+      && typeof args[0] === 'number' && (args[0] & fsConstants.O_WRONLY)) written.push(path);
     return fs.open(path, ...args);
   } };
   const store = await open({ fsImpl });
@@ -100,9 +102,9 @@ test('duplicate ownership and idempotent close do not release a newer owner', as
   await assert.rejects(first.global.set(initial()), code('STORE_CLOSED'));
 }));
 
-test('another process owns the library until close; crash leaves a fail-closed sentinel', async () => fixture(async ({ file, open }) => {
+test('another process can open the library without holding an open-lifetime sentinel', async () => fixture(async ({ file, open }) => {
   const child = spawn(process.execPath, [new URL('../fixtures/store-owner.js', import.meta.url).pathname, file],
-    { stdio: ['pipe', 'pipe', 'pipe'] });
+    { stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
   try {
     const ready = await Promise.race([
       once(child.stdout, 'data').then(([data]) => data.toString()),
@@ -110,30 +112,74 @@ test('another process owns the library until close; crash leaves a fail-closed s
     ]);
     assert.equal(ready, 'ready\n');
     const before = await fs.readFile(file);
-    await assert.rejects(open(), code('STORE_OWNED'));
+    assert.equal(await fs.stat(join(dirname(file), '.dsh-session-notebook.lock')).then(() => true, () => false), false);
+    child.send({ action: 'get' });
+    const [loaded] = await once(child, 'message');
+    assert.equal(loaded.snapshot.revision, 0);
     await assert.rejects(openJsonStore({ file: join(dirname(file), 'other-manifest.json') }), code('STORE_OWNED'));
     assert.deepEqual(await fs.readFile(file), before);
-    child.stdin.end();
-    assert.equal((await once(child, 'exit'))[0], 0);
-    const store = await open(); await store.close();
-    const crashed = spawn(process.execPath, [new URL('../fixtures/store-owner.js', import.meta.url).pathname, file],
-      { stdio: ['pipe', 'pipe', 'pipe'] });
-    try {
-      assert.equal((await once(crashed.stdout, 'data'))[0].toString(), 'ready\n');
-      crashed.kill('SIGKILL'); await once(crashed, 'exit');
-      await assert.rejects(open(), code('STORE_OWNED'));
-      assert.deepEqual(await fs.readFile(file), before);
-    } finally { if (crashed.exitCode === null && crashed.signalCode === null) crashed.kill(); }
+    child.kill('SIGKILL'); await once(child, 'exit');
+    assert.equal(await fs.stat(join(dirname(file), '.dsh-session-notebook.lock')).then(() => true, () => false), false);
+    assert.deepEqual(await fs.readFile(file), before);
   } finally { if (child.exitCode === null && child.signalCode === null) { child.kill(); await once(child, 'exit'); } }
+}));
+
+test('two open processes refresh each other and reject a stale manifest commit', async () => fixture(async ({ file, open }) => {
+  const local = await open();
+  const child = spawn(process.execPath, [new URL('../fixtures/store-owner.js', import.meta.url).pathname, file],
+    { stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
+  const take = async action => {
+    const waiting = once(child, 'message'); child.send({ action, key: 'remote' });
+    return (await waiting)[0];
+  };
+  try {
+    assert.equal((await once(child.stdout, 'data'))[0].toString(), 'ready\n');
+    await local.global.set(nextSnapshot(local.global.get(), { notes: { local: note('local') } }));
+    assert.deepEqual(await take('write'), { action: 'write', error: 'VERSION_CONFLICT' });
+    assert.equal((await take('reload')).snapshot.revision, 1);
+    assert.deepEqual(await take('write'), { action: 'write', revision: 2 });
+    const latest = await local.reload();
+    assert.deepEqual(Object.keys(latest.notes).sort(), ['local', 'remote']);
+    assert.equal(latest.revision, 2);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL'); await once(child, 'exit');
+    }
+  }
+}));
+
+test('simultaneous processes serialize the manifest commit and preserve one winner', async () => fixture(async ({ file, open }) => {
+  const local = await open();
+  const child = spawn(process.execPath, [new URL('../fixtures/store-owner.js', import.meta.url).pathname, file],
+    { stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
+  const childWrite = once(child, 'message').then(([message]) => message);
+  try {
+    assert.equal((await once(child.stdout, 'data'))[0].toString(), 'ready\n');
+    child.send({ action: 'write', key: 'remote' });
+    const localWrite = local.global.set(nextSnapshot(local.global.get(), { notes: { local: note('local') } }));
+    const results = await Promise.allSettled([localWrite, childWrite]);
+    const localCommitted = results[0].status === 'fulfilled';
+    const remoteCommitted = results[1].value.error === undefined;
+    assert.equal(Number(localCommitted) + Number(remoteCommitted), 1);
+    if (!localCommitted) assert.equal(results[0].reason.code, 'VERSION_CONFLICT');
+    if (!remoteCommitted) assert.equal(results[1].value.error, 'VERSION_CONFLICT');
+    const latest = await local.reload();
+    assert.equal(latest.revision, 1);
+    assert.equal(Object.keys(latest.notes).length, 1);
+    assert.ok(['local', 'remote'].includes(Object.keys(latest.notes)[0]));
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL'); await once(child, 'exit');
+    }
+  }
 }));
 
 test('replaced sentinel stops writes and close never unlinks the replacement', async () => fixture(async ({ file, open, forget }) => {
   const store = await open();
   const lock = join(dirname(file), '.dsh-session-notebook.lock');
-  await fs.unlink(lock);
   await fs.writeFile(lock, 'replacement', { mode: 0o600 });
   await assert.rejects(store.global.set(nextSnapshot(store.global.get())), code('STORE_OWNED'));
-  await assert.rejects(store.close(), code('STORE_OWNED'));
+  await store.close();
   forget(store);
   assert.equal(await fs.readFile(lock, 'utf8'), 'replacement');
   await assert.rejects(open(), code('STORE_OWNED'));
@@ -234,6 +280,9 @@ for (const stage of ['write', 'file-sync', 'rename', 'directory-sync']) {
         const temporary = path.endsWith('.tmp');
         return {
           close: () => handle.close(),
+          stat: (...values) => handle.stat(...values),
+          read: (...values) => handle.read(...values),
+          readFile: (...values) => handle.readFile(...values),
           async writeFile(...writeArgs) {
             if (temporary && stage === 'write') throw new Error('private write');
             return handle.writeFile(...writeArgs);
@@ -254,7 +303,7 @@ for (const stage of ['write', 'file-sync', 'rename', 'directory-sync']) {
     await assert.rejects(store.global.set(next), code('COMMIT_UNKNOWN'));
     assert.equal(store.global.get().notes.one.bodyMarkdown, 'old');
     await assert.rejects(store.global.set(next), code('COMMIT_UNKNOWN'));
-    assert.deepEqual((await fs.readdir(dirname(file))).sort(), ['.dsh-session-notebook.lock', 'data', 'manifest.json']);
+    assert.deepEqual((await fs.readdir(dirname(file))).sort(), ['.dsh-session-notebook.owner', 'data', 'manifest.json']);
     assert.equal((await fs.readdir(data)).length, 2);
     enabled = false;
     await store.close();
@@ -268,14 +317,14 @@ for (const stage of ['write', 'file-sync', 'rename', 'directory-sync']) {
 
 test('data write failure never changes manifest, removes incomplete file and freezes queued writes', async () => fixture(async ({ data, file, open }) => {
   let enabled = false;
-  const fsImpl = { ...fs, async open(path, ...args) {
+    const fsImpl = { ...fs, async open(path, ...args) {
     const handle = await fs.open(path, ...args);
-    if (!enabled || dirname(path) !== data || !path.endsWith('.json')) return handle;
+    if (!enabled || !path.includes('.pending-') || !path.endsWith('.json')) return handle;
     return { close: () => handle.close(), writeFile: async () => { throw new Error('hidden'); } };
   } };
   const store = await open({ fsImpl }); const before = await fs.readFile(file); enabled = true;
   const next = nextSnapshot(store.global.get(), { notes: { one: note('one') } });
-  await Promise.all([store.global.set(next), store.global.set(next)].map(write => assert.rejects(write, code('COMMIT_UNKNOWN'))));
+  await Promise.all([store.global.set(next), store.global.set(next)].map(write => assert.rejects(write, code('STORE_UNAVAILABLE'))));
   assert.deepEqual(await fs.readFile(file), before);
   assert.deepEqual(await fs.readdir(data), []);
 }));
@@ -300,6 +349,9 @@ test('garbage collection failure cannot change successful commit; validated reop
 test('valid open ignores and reclaims controlled orphans but preserves unknown names and symlinks', async () => fixture(async ({ root, data, open }) => {
   const store = await open(); await store.close();
   const orphan = `${randomUUID()}.json`; await fs.writeFile(join(data, orphan), 'uncommitted');
+  const abandoned = join(data, `.pending-2147483647-${randomUUID()}`);
+  await fs.mkdir(abandoned, { mode: 0o700 });
+  await fs.writeFile(join(abandoned, `${randomUUID()}.json`), 'abandoned staging');
   await fs.writeFile(join(data, 'user-file.json'), 'user');
   const link = `${randomUUID()}.json`; await fs.symlink(join(root, 'missing'), join(data, link));
   const reopened = await open();
@@ -332,7 +384,7 @@ test('coordinator commits receipt in manifest and freezes after an uncertain man
 test('failed initial manifest commit releases ownership and removes temporary file', async () => fixture(async ({ file, open }) => {
   const fsImpl = { ...fs, rename: async () => { throw new Error('hidden'); } };
   await assert.rejects(open({ fsImpl }), code('STORE_UNAVAILABLE'));
-  assert.deepEqual(await fs.readdir(dirname(file)), ['data']);
+  assert.deepEqual((await fs.readdir(dirname(file))).sort(), ['.dsh-session-notebook.owner', 'data']);
   assert.equal((await open()).global.get().revision, 0);
 }));
 
@@ -343,15 +395,17 @@ test('new data file and data directory sync precede the manifest commit', async 
     if (path === file || path.endsWith('.dsh-session-notebook.lock')) return handle;
     return {
       stat: () => handle.stat(),
+      read: (...values) => handle.read(...values),
       close: () => handle.close(),
       writeFile: (...values) => handle.writeFile(...values),
       async sync() { events.push(path === data ? 'data-directory' : path.endsWith('.tmp') ? 'manifest-file'
-        : path === dirname(file) ? 'manifest-directory' : 'data-file'); await handle.sync(); },
+        : path === dirname(file) ? 'manifest-directory' : path.includes('.pending-')
+          ? (path.endsWith('.json') ? 'data-file' : 'staging-directory') : 'data-file'); await handle.sync(); },
     };
   }, async rename(...args) { events.push('manifest-rename'); return fs.rename(...args); } };
   const store = await open({ fsImpl }); events.length = 0;
   await store.global.set(nextSnapshot(store.global.get(), { notes: { one: note('one') } }));
-  assert.deepEqual(events, ['data-file', 'data-directory', 'manifest-file', 'manifest-rename', 'manifest-directory']);
+  assert.deepEqual(events, ['data-file', 'staging-directory', 'data-directory', 'manifest-file', 'manifest-rename', 'manifest-directory']);
 }));
 
 test('data directory sync failure leaves old manifest authoritative and reopens without the orphan', async () => fixture(async ({ file, data, open }) => {
@@ -362,7 +416,7 @@ test('data directory sync failure leaves old manifest authoritative and reopens 
     return { close: () => handle.close(), sync: async () => { throw new Error('hidden'); } };
   } };
   const store = await open({ fsImpl }); const before = await fs.readFile(file); enabled = true;
-  await assert.rejects(store.global.set(nextSnapshot(store.global.get(), { notes: { one: note('one') } })), code('COMMIT_UNKNOWN'));
+  await assert.rejects(store.global.set(nextSnapshot(store.global.get(), { notes: { one: note('one') } })), code('STORE_UNAVAILABLE'));
   assert.deepEqual(await fs.readFile(file), before);
   assert.equal((await fs.readdir(data)).length, 1);
   await store.close();
@@ -403,8 +457,8 @@ for (const collision of ['data', 'temporary']) {
   test(`${collision} exclusive-create collision preserves the pre-existing file`, async () => fixture(async ({ data, open }) => {
     let enabled = false;
     let collided;
-    const fsImpl = { ...fs, async open(path, ...args) {
-      if (enabled && ((collision === 'data' && dirname(path) === data && path.endsWith('.json'))
+  const fsImpl = { ...fs, async open(path, ...args) {
+      if (enabled && ((collision === 'data' && path.includes('.pending-') && path.endsWith('.json'))
         || (collision === 'temporary' && path.endsWith('.tmp')))) {
         collided = path;
         await fs.writeFile(path, 'pre-existing');
@@ -414,7 +468,8 @@ for (const collision of ['data', 'temporary']) {
     } };
     const store = await open({ fsImpl }); enabled = true;
     const changes = collision === 'data' ? { notes: { one: note('one') } } : {};
-    await assert.rejects(store.global.set(nextSnapshot(store.global.get(), changes)), code('COMMIT_UNKNOWN'));
+    await assert.rejects(store.global.set(nextSnapshot(store.global.get(), changes)),
+      code(collision === 'data' ? 'STORE_UNAVAILABLE' : 'COMMIT_UNKNOWN'));
     assert.equal(await fs.readFile(collided, 'utf8'), 'pre-existing');
   }));
 }
@@ -424,7 +479,8 @@ test('reopen must sync an uncertain renamed manifest before reclaiming old refer
   const fsImpl = { ...fs, async open(path, ...args) {
     const handle = await fs.open(path, ...args);
     if (path !== dirname(file)) return handle;
-    return { close: () => handle.close(), async sync() {
+    return { stat: (...values) => handle.stat(...values), read: (...values) => handle.read(...values),
+      close: () => handle.close(), async sync() {
       if (failParentSync) throw new Error('hidden sync failure');
       await handle.sync();
     } };

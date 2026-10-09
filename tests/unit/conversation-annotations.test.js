@@ -48,6 +48,34 @@ test('real selection freezes plain text intent; only receipt and reload install 
   f.adapter.dispose(); assert.equal(f.registry.size, 0); assert.equal(f.listeners.size, 0);
 });
 
+test('ordinary selection ignores unrelated rendered controls and locates the highlight', async () => {
+  const f = fixture();
+  f.bodies[0].innerText = '前文额外内容原文甲乙后文';
+  f.adapter.capture();
+  assert.equal(f.adapter.snapshot().draft.unlocated, undefined);
+  await f.adapter.save('highlight');
+  assert.equal(f.adapter.snapshot().items[0].status, 'found');
+  assert.equal(f.registry.size, 1);
+  f.adapter.dispose();
+});
+
+test('unmappable selection text saves the exact quote without claiming a highlight', async () => {
+  const f = fixture();
+  f.document.getSelection = () => ({ isCollapsed: false, rangeCount: 1,
+    getRangeAt: () => f.range, toString: () => '浏览器额外内容' });
+  f.adapter.capture();
+  const draft = f.adapter.snapshot().draft;
+  assert.equal(draft.quote.content, '浏览器额外内容');
+  assert.equal(draft.unlocated, true);
+  assert.deepEqual(draft.anchor, { exact: '浏览器额外内容' });
+  await f.adapter.save('highlight');
+  assert.equal(f.writes[0].quote.content, '浏览器额外内容');
+  assert.deepEqual(f.writes[0].anchor, { exact: '浏览器额外内容' });
+  assert.equal(f.adapter.snapshot().items[0].status, 'unloaded-or-changed');
+  assert.equal(f.registry.size, 0);
+  f.adapter.dispose();
+});
+
 test('unknown commit retains draft and request; explicit retry uses exact same payload', async () => {
   const f = fixture(); f.adapter.capture(); f.loseReply();
   await f.adapter.save('highlight');

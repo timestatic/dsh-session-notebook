@@ -1,4 +1,4 @@
 - insert:
     - id: session-notebook
-      name: dsh-session-notebook
+      name: '@timestatic/dsh-session-notebook'
       config: {}

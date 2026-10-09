@@ -44,6 +44,8 @@ export function messageTextIndex(root, { maxTextUnits = 1024 * 1024, maxNodes = 
     if (block) pendingGap = true;
   };
   walk(root);
+  // Capture and relocation use this same DOM-backed stream. A whole-body
+  // innerText comparison is unsafe: message controls can add unrelated text.
   const segmentFor = new Map(segments.map(entry => [entry.node, entry]));
   const current = () => {
     if (root.isConnected === false || tree.some(({ node, children, value }) =>
@@ -77,9 +79,11 @@ export function messageTextIndex(root, { maxTextUnits = 1024 * 1024, maxNodes = 
       if (!range || typeof exact !== 'string') fail('UNMAPPABLE_RANGE');
       const startOffset = offset(range.startContainer, range.startOffset, false);
       const endOffset = offset(range.endContainer, range.endOffset, true);
-      if (startOffset >= endOffset || text.slice(startOffset, endOffset) !== exact)
-        fail('UNMAPPABLE_RANGE');
-      return { exact, sourceText: text, startOffset, endOffset };
+      const indexed = text.slice(startOffset, endOffset);
+      if (startOffset >= endOffset || (indexed !== exact
+        && foldedTextMap(indexed).text !== foldedTextMap(exact).text)) fail('UNMAPPABLE_RANGE');
+      return { exact, sourceText: text, startOffset, endOffset,
+        ...(indexed !== exact ? { normalized: true } : {}) };
     },
     range(startOffset, endOffset) {
       current();

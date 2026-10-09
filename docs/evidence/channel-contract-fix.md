@@ -2,7 +2,7 @@
 
 ## 当前门禁
 
-继续严格执行 DEVELOPMENT_GUIDE Step 0–2；不进入 Step 3 存储写入或 Step 4 产品保存。当前 Host `Config.listConfigs({name:'dsh-session-notebook'})` 返回 entries=[]：当前组合中未发现 Notebook 配置条目。不能据此推导磁盘包已删除，也不能声称已安装最新版本。
+历史 0.0.10 阶段曾依据旧开发指南 Step 0–2 阻断存储和产品保存；此门禁状态已过时，当前范围见[现行设计](../DESIGN.md)。当时 Host `Config.listConfigs({name:'dsh-session-notebook'})` 返回 entries=[]：当前组合中未发现 Notebook 配置条目。不能据此推导磁盘包已删除，也不能声称已安装最新版本。
 
 ## 发现的缺陷
 

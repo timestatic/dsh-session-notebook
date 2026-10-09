@@ -18,6 +18,9 @@ coverage/
 !.env.example
 *.log
 
+# Local historical cloud environment audit; not project documentation
+/docs/CLOUD_ENVIRONMENT_REVIEW.md
+
 # Synthetic diagnostic tests and local runtime evidence (never package/commit)
 .diagnostic-test-output/
 .storage-test-output/

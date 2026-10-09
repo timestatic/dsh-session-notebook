@@ -26,7 +26,7 @@ async page => {
   const second = await toolbar.boundingBox();
   check(second.y < first.y - 100, 'toolbar follows the new earlier selection');
   check(await toolbar.locator('textarea').count() === 0, 'reselection stays compact');
-  await toolbar.getByRole('button', { name: '划线', exact: true }).click();
+  await toolbar.getByRole('button', { name: '保存划线', exact: true }).click();
   await toolbar.waitFor({ state: 'detached' });
   check(await page.evaluate(() => {
     const intent = window.fixtureCalls.filter(call => call.method.endsWith('/notes/excerpt')).at(-1).payload;

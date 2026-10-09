@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: 'dsh-session-notebook',
+  id: '@timestatic/dsh-session-notebook',
   factory(require) {
     const React = require('react');
     // Generated from Client ESM modules by scripts/build-client.mjs.
@@ -198,8 +198,8 @@ window.__ModuleLoader__.load({
     })();
 
     const manualSaveController = (() => {
-    // Pending Client save flow, not installed in the Phase 0 UI. Host remains the
-    // sole authority; a transport failure MUST preserve the same intent for retry.
+    // Client save flow. Host remains the sole authority; a transport failure
+    // MUST preserve the same intent for retry.
     const failure = code => Object.assign(new Error(code), { code });
     const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
     const MAX_TITLE_CODEPOINTS = 1000;
@@ -891,7 +891,7 @@ window.__ModuleLoader__.load({
     return { MAX_INPUT_INSERT_BYTES, currentInput, writeInput };
     })();
 
-    const { messageTextIndex } = (() => {
+    const { messageTextIndex, foldedTextMap } = (() => {
     // Standard DOM operations for one caller-verified message body only. This
     // module cannot discover a message, authenticate its identity, or save a quote.
     const blockTags = new Set(['P', 'DIV', 'PRE', 'LI', 'UL', 'OL', 'BLOCKQUOTE',
@@ -938,6 +938,8 @@ window.__ModuleLoader__.load({
         if (block) pendingGap = true;
       };
       walk(root);
+      // Capture and relocation use this same DOM-backed stream. A whole-body
+      // innerText comparison is unsafe: message controls can add unrelated text.
       const segmentFor = new Map(segments.map(entry => [entry.node, entry]));
       const current = () => {
         if (root.isConnected === false || tree.some(({ node, children, value }) =>
@@ -971,9 +973,11 @@ window.__ModuleLoader__.load({
           if (!range || typeof exact !== 'string') fail('UNMAPPABLE_RANGE');
           const startOffset = offset(range.startContainer, range.startOffset, false);
           const endOffset = offset(range.endContainer, range.endOffset, true);
-          if (startOffset >= endOffset || text.slice(startOffset, endOffset) !== exact)
-            fail('UNMAPPABLE_RANGE');
-          return { exact, sourceText: text, startOffset, endOffset };
+          const indexed = text.slice(startOffset, endOffset);
+          if (startOffset >= endOffset || (indexed !== exact
+            && foldedTextMap(indexed).text !== foldedTextMap(exact).text)) fail('UNMAPPABLE_RANGE');
+          return { exact, sourceText: text, startOffset, endOffset,
+            ...(indexed !== exact ? { normalized: true } : {}) };
         },
         range(startOffset, endOffset) {
           current();
@@ -1013,7 +1017,8 @@ window.__ModuleLoader__.load({
     return { messageTextIndex, foldedTextMap };
     })();
 
-    const { locateTextAnchor } = (() => {
+    const { locateTextAnchor } = ((foldedTextMap) => {
+
     // Pure locator for one caller-verified, mounted message text block. Offsets
     // are UTF-16 code units of that block; this function does not inspect the DOM,
     // authenticate a messageId, or install browser highlights.
@@ -1046,7 +1051,35 @@ window.__ModuleLoader__.load({
       for (let position = text.indexOf(exact); position !== -1; position = text.indexOf(exact, position + 1)) {
         hits.push(position);
       }
-      if (!hits.length) return { status: 'missing' };
+      if (!hits.length) {
+        // Selection.toString() and innerText can differ in paragraph/list line
+        // breaks. Fold only for lookup; keep the user's exact quote unchanged.
+        const folded = foldedTextMap(text), target = foldedTextMap(exact).text;
+        if (!target) return { status: 'missing' };
+        const before = prefix === undefined ? undefined : foldedTextMap(prefix).text;
+        const after = suffix === undefined ? undefined : foldedTextMap(suffix).text;
+        const candidates = [];
+        for (let position = folded.text.indexOf(target); position !== -1;
+          position = folded.text.indexOf(target, position + 1)) {
+          const raw = folded.rawRange(position, position + target.length);
+          candidates.push({ ...raw, position,
+            context: (before === undefined || (position >= before.length
+              && folded.text.slice(position - before.length, position) === before))
+              && (after === undefined || folded.text.slice(position + target.length,
+                position + target.length + after.length) === after) });
+        }
+        if (!candidates.length) return { status: 'missing' };
+        const contextual = candidates.filter(candidate => candidate.context);
+        if ((prefix !== undefined || suffix !== undefined) && contextual.length === 1) {
+          const { startOffset, endOffset } = contextual[0];
+          return { status: 'found', startOffset, endOffset, match: 'folded-context' };
+        }
+        if (contextual.length > 1 || candidates.length > 1) return { status: 'ambiguous' };
+        if (prefix !== undefined || suffix !== undefined || (occurrence !== undefined && occurrence !== 0))
+          return { status: 'missing' };
+        const { startOffset, endOffset } = candidates[0];
+        return { status: 'found', startOffset, endOffset, match: 'folded-unique' };
+      }
       if (prefix !== undefined || suffix !== undefined) {
         const contextual = hits.filter(matchesContext);
         if (contextual.length === 1) {
@@ -1067,7 +1100,7 @@ window.__ModuleLoader__.load({
     }
 
     return { locateTextAnchor };
-    })();
+    })(foldedTextMap);
 
     const { conversationAnnotations, renderedConversationBodies } = ((messageTextIndex, locateTextAnchor) => {
 
@@ -1110,6 +1143,8 @@ window.__ModuleLoader__.load({
           if (!matches.length) return { id: note.id, status: 'unloaded-or-changed' };
           try {
             const range = matches[0].index.range(matches[0].result.startOffset, matches[0].result.endOffset);
+            if (typeof range.getClientRects === 'function' && !range.getClientRects().length)
+              return { id: note.id, status: 'unloaded-or-changed' };
             ranges.push(range); located.push({ id: note.id, range, index: matches[0].index, exact: note.anchor.exact });
             return { id: note.id, status: typeof Highlight === 'function' && registry ? 'found' : 'highlight-unavailable' };
           } catch { return { id: note.id, status: 'unloaded-or-changed' }; }
@@ -1172,15 +1207,20 @@ window.__ModuleLoader__.load({
         if (Array.from(body.querySelectorAll?.(excluded) ?? []).some(node => range.intersectsNode(node))) return;
         const exact = selection.toString();
         if ([...exact].filter(point => !/\s/u.test(point)).length < 2 || [...exact].length > 8000) return;
+        const rect = range.getBoundingClientRect();
+        const draft = { quote: { format: 'plain_text', content: exact }, source: { ...source, sessionId },
+          position: { left: rect.left, top: rect.bottom } };
         try {
           const indexed = messageTextIndex(body).selection(range, exact);
-          const rect = range.getBoundingClientRect();
-          publish({ draft: { quote: { format: 'plain_text', content: exact },
-            anchor: { exact, prefix: indexed.sourceText.slice(Math.max(0, indexed.startOffset - 32), indexed.startOffset),
+          publish({ draft: { ...draft, anchor: { exact,
+            prefix: indexed.sourceText.slice(Math.max(0, indexed.startOffset - 32), indexed.startOffset),
               suffix: indexed.sourceText.slice(indexed.endOffset, indexed.endOffset + 32),
-              startOffset: indexed.startOffset, endOffset: indexed.endOffset }, source: { ...source, sessionId },
-            position: { left: rect.left, top: rect.bottom } }, diagnostic: null });
-        } catch { publish({ diagnostic: 'UNMAPPABLE_RANGE' }); }
+              ...(indexed.normalized ? {} : { startOffset: indexed.startOffset, endOffset: indexed.endOffset }) } }, diagnostic: null });
+        } catch (failure) {
+          if (failure?.code === 'UNMAPPABLE_RANGE')
+            publish({ draft: { ...draft, anchor: { exact }, unlocated: true }, diagnostic: null });
+          else publish({ diagnostic: failure?.code ?? 'UNMAPPABLE_RANGE' });
+        }
       };
       const save = async (kind, bodyMarkdown = state.bodyMarkdown ?? '') => {
         // Every save action preserves typed annotations, including quick-tag shortcuts.
@@ -1316,13 +1356,12 @@ window.__ModuleLoader__.load({
     })();
     const h = React.createElement;
     const namespace = 'dsh-session-notebook';
-    const version = '0.0.36';
+    const version = '0.1.0';
     return {
       inject: ['slots', 'locale', 'connection', 'uiWorkspace', 'uiSession', 'sessions', 'workspaces'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(namespace, 'en', {
           title: 'AI Notes', open: 'Open AI Notes', close: 'Close',
-          empty: 'Loading check only. Notebook saving is not available yet.',
           connecting: 'Checking Host connection…', connected: 'Host connected; storage is not ready.',
           ready: 'Notebook storage is ready.',
           failed: 'Connection check failed. Please retry.', retry: 'Retry',
@@ -1345,7 +1384,6 @@ window.__ModuleLoader__.load({
           backupSavedNotes: 'Download saved notes as JSON', backupWorking: 'Preparing backup…',
           backupStarted: 'Download requested. Check your downloads.',
           restorePreviewFile: 'Choose a JSON backup to preview',
-          restorePreviewOnly: 'Preview only. Restoring is unavailable until the old medium can be protected.',
           restorePreviewWorking: 'Checking backup and current library…',
           restorePreviewRetry: 'Retry the same backup upload',
           restorePreviewRefresh: 'Refresh impact against the current library',
@@ -1440,7 +1478,6 @@ window.__ModuleLoader__.load({
         }));
         ctx.effect(() => ctx.locale.register(namespace, 'zh', {
           title: 'AI 笔记', open: '打开 AI 笔记', close: '关闭',
-          empty: '当前仅验证插件加载，尚不提供笔记保存。',
           connecting: '正在检查 Host 连接…', connected: 'Host 已连接；存储尚未就绪。',
           ready: '笔记存储已就绪。',
           failed: '连接检查失败，请重试。', retry: '重试',
@@ -1463,7 +1500,6 @@ window.__ModuleLoader__.load({
           backupSavedNotes: '下载已保存笔记的 JSON 备份', backupWorking: '正在准备备份…',
           backupStarted: '已发起下载，请检查下载列表。',
           restorePreviewFile: '选择 JSON 备份并预览',
-          restorePreviewOnly: '当前仅支持预览。保护旧介质的能力就绪前不能执行恢复。',
           restorePreviewWorking: '正在校验备份和当前笔记库…',
           restorePreviewRetry: '按同一上传 ID 重试',
           restorePreviewRefresh: '按当前笔记库重新计算影响',
@@ -1604,7 +1640,8 @@ window.__ModuleLoader__.load({
           'TITLE_LIMIT', 'BODY_LIMIT', 'SEARCH_LIMIT', 'TAG_NAME_LIMIT',
           'INVALID_BACKUP', 'BACKUP_TOO_LARGE', 'UNSUPPORTED_BACKUP',
           'UPLOAD_BUSY', 'UPLOAD_NOT_FOUND', 'UPLOAD_CONFLICT', 'UPLOAD_INCOMPLETE',
-          'NAME_CONFLICT', 'CONFIRM_REQUIRED', 'SESSION_ACTIVITY_UNAVAILABLE']);
+          'NAME_CONFLICT', 'CONFIRM_REQUIRED', 'SESSION_ACTIVITY_UNAVAILABLE',
+          'UNMAPPABLE_RANGE']);
         const safeDiagnostic = error => visibleCodes.has(error?.code) ? error.code : 'TRANSPORT_FAILED';
         const controllerFor = key => {
           if (controllerRecords.has(key)) return controllerRecords.get(key);
@@ -1687,7 +1724,7 @@ window.__ModuleLoader__.load({
         };
         const notebookStyles = `
 [data-notebook-panel],[data-notebook-shell]{font-family:inherit;font-size:14px;line-height:1.55;color:var(--dsw-alias-label-primary,#252830);background:var(--dsw-alias-bg-base,#fff);overflow-wrap:anywhere}
-[data-notebook-panel]{height:100%;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable;box-sizing:border-box;padding:16px}
+[data-notebook-panel]{height:100%;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable;box-sizing:border-box;padding:16px;container: notebook-panel / inline-size}
 [data-notebook-panel]>code{display:none}
 [data-notebook-panel]>div>p{margin:4px 0;font-size:12px;color:var(--dsw-alias-label-secondary,#707681)}
 [data-notebook-panel] h3,[data-notebook-shell] h3{font-size:18px;margin:16px 0 12px}
@@ -1946,11 +1983,14 @@ button[data-notebook-menu]{width:100%;box-sizing:border-box}
 .notebook-basic-filters>[data-notebook-tag-filter]>button{display:inline-flex;align-items:center;gap:3px}
 .notebook-basic-filters>[data-notebook-tag-filter] .notebook-tag-color{width:10px;height:10px;margin-right:1px}
 [data-notebook-search-form]>[data-notebook-filters]{grid-column:1;margin:0;order:1}
-[data-notebook-filters]>.notebook-filter-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding:8px 0 2px}
-[data-notebook-filters]>.notebook-filter-grid>select{height:34px;align-self:end;padding:4px 7px}
-[data-notebook-filters] .notebook-filter-grid>label{display:block;min-width:0;color:var(--dsw-alias-label-secondary)}
-[data-notebook-filters] .notebook-filter-grid>label input{margin-top:3px}
-[data-notebook-filters] .notebook-advanced-keyword{grid-column:1/-1}
+[data-notebook-filters]>.notebook-filter-grid{display:grid;grid-template-columns:minmax(90px,.6fr) repeat(2,minmax(0,1fr));gap:7px;padding:8px 0 2px;align-items:end}
+[data-notebook-filters]>.notebook-filter-grid>label{display:flex;flex-direction:column;align-items:stretch;gap:3px;min-width:0;color:var(--dsw-alias-label-secondary)}
+[data-notebook-filters] .notebook-filter-grid>label input{width:100%;min-width:0;margin:0}
+[data-notebook-panel] [data-notebook-filters] .notebook-filter-grid>label input[type=datetime-local]{font-size:11px;padding:5px 4px;min-height:34px}
+[data-notebook-filters] .notebook-filter-grid>label select{width:100%;min-width:0;height:34px;padding:4px 7px}
+[data-notebook-filters] .notebook-filter-grid>label:first-child{grid-column:1/-1}
+@container notebook-panel (max-width:680px){[data-notebook-filters]>.notebook-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}[data-notebook-filters] .notebook-filter-grid>label:nth-child(2){grid-column:1/-1}}
+@container notebook-panel (max-width:400px){[data-notebook-filters]>.notebook-filter-grid{grid-template-columns:1fr}[data-notebook-filters] .notebook-filter-grid>label:first-child{grid-column:1}}
 .notebook-filter-actions{display:flex;justify-content:flex-start;gap:6px;order:2}
 [data-notebook-panel] .notebook-filter-actions>button{min-width:64px;min-height:28px!important;padding:4px 9px!important;font-size:11px!important;margin:0!important}
 [data-notebook-panel] .notebook-card-footer>[data-note-more]{margin-left:0}
@@ -1968,7 +2008,8 @@ button[data-notebook-menu]{width:100%;box-sizing:border-box}
 [data-notebook-tag-colors] legend{font-size:12px;color:var(--dsw-alias-label-secondary)}
 [data-notebook-tag-colors] label{display:inline-flex;align-items:center;gap:5px;padding:4px 7px;border:1px solid var(--nb-line);border-radius:6px;cursor:pointer}
 [data-notebook-tag-colors] label:has(input:checked){border-color:var(--nb-accent);background:var(--nb-soft)}
-[data-notebook-tag-colors] label:focus-within{outline:2px solid var(--nb-accent);outline-offset:2px}
+[data-notebook-tag-colors] label:has(input:focus-visible){outline:2px solid var(--dsw-alias-brand-primary,#3A86FF);outline-offset:1px}
+[data-notebook-panel] [data-notebook-tag-colors] input:focus-visible{outline:none;box-shadow:none}
 [data-notebook-tag-colors] .notebook-color-swatch{width:20px;height:20px;border-radius:50%;background:var(--choice-color);border:1px solid var(--nb-line)}
 [data-notebook-tag-edit-dialog]{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1102;width:min(520px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box;padding:20px;border:1px solid var(--nb-line);border-radius:12px;background:var(--dsw-alias-bg-overlay,var(--dsw-alias-bg-base,#fff));box-shadow:0 16px 60px #14213a25}
 [data-notebook-tag-edit-dialog] h4{margin:0 0 16px;font-size:16px}
@@ -1983,16 +2024,21 @@ button[data-notebook-menu]{width:100%;box-sizing:border-box}
 .notebook-compose-tags label{display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border-radius:6px;background:var(--nb-soft);font-size:12px}
 .notebook-compose-tags .notebook-tag-color{margin-right:2px}
 /* Tag manager: one clear type scale across the list, controls and color picker. */
-[data-notebook-panel] [data-notebook-tag-heading] h4{font-size:16px;line-height:1.4;margin:8px 0 6px}
+[data-notebook-panel] [data-notebook-tag-heading] h4{font-size:15px;line-height:1.4;margin:8px 0 6px}
 [data-notebook-panel] [data-notebook-tags] .notebook-tag-row{min-height:34px;padding:8px 0}
-[data-notebook-panel] [data-notebook-tags] .notebook-tag-row>span{font-size:14px;line-height:1.4}
-[data-notebook-panel] [data-notebook-tags] .notebook-tag-row small{font-size:12px;color:var(--dsw-alias-label-secondary)}
+[data-notebook-panel] [data-notebook-tags] .notebook-tag-row>span{font-size:13px;line-height:1.4}
+[data-notebook-panel] [data-notebook-tags] .notebook-tag-row small{font-size:11px;color:var(--dsw-alias-label-secondary)}
 [data-notebook-panel] [data-notebook-tags] .notebook-tag-actions>summary,
 [data-notebook-panel] [data-notebook-tags] .notebook-tag-menu>button,
 [data-notebook-panel] [data-notebook-tags]>label:has(input[type=text]),
 [data-notebook-panel] [data-notebook-tags]>button,
 [data-notebook-panel] [data-notebook-tag-colors] legend,
-[data-notebook-panel] [data-notebook-tag-colors] label{font-size:12px!important;line-height:1.4}
+[data-notebook-panel] [data-notebook-tag-colors] label{font-size:11px!important;line-height:1.4}
+[data-notebook-panel] [data-notebook-tags]>label input[type=text],
+[data-notebook-panel] [data-notebook-tag-edit-dialog]>label input{font-size:11px!important}
+[data-notebook-panel] [data-notebook-tag-edit-dialog] h4{font-size:15px}
+[data-notebook-panel] [data-notebook-tag-edit-dialog]>label{font-size:11px}
+[data-notebook-panel] [data-notebook-tag-edit-dialog] button{font-size:11px!important}
 [data-notebook-panel] [data-notebook-tags] .notebook-tag-actions>summary{min-height:28px}
 [data-notebook-panel] [data-notebook-tag-colors] label{min-height:32px;box-sizing:border-box}
 [data-notebook-panel] [data-notebook-tag-colors] .notebook-color-swatch{width:18px;height:18px}
@@ -2077,6 +2123,10 @@ button[data-notebook-menu]{width:100%;box-sizing:border-box}
           const body = state.bodyMarkdown ?? "";
           const working = state.status === 'saving';
           const problem = state.items?.filter(item => item.status !== 'found');
+          const annotationSaveStyle = { ...controlStyle,
+            background: 'color-mix(in srgb, var(--dsw-alias-brand-primary,#4869db) 10%, transparent)',
+            borderColor: 'color-mix(in srgb, var(--dsw-alias-brand-primary,#4869db) 38%, transparent)',
+            color: 'var(--dsw-alias-brand-primary,#4869db)', fontWeight: 600 };
           const detailStyle = { position: 'fixed', zIndex: 1000, left: Math.max(8, Math.min(state.detailPosition?.left ?? 16, (window.innerWidth ?? 800) - 350)),
             top: Math.max(8, Math.min((state.detailPosition?.top ?? 16) + 8, (window.innerHeight ?? 600) - 260)), width: 320, maxHeight: 240, overflow: 'auto', padding: 12, border: '1px solid #999',
             borderRadius: 8, background: 'var(--dsw-alias-bg-base, white)', color: 'var(--dsw-alias-label-primary, #222)' };
@@ -2092,19 +2142,19 @@ button[data-notebook-menu]{width:100%;box-sizing:border-box}
               h('button', { type: 'button', style: controlStyle, onClick: () => adapter.current?.closeDetail() }, '关闭')) : null,
             problem?.length ? h('details', { style: { color: 'var(--dsw-alias-label-secondary, #666)', padding: '4px 0' } },
               h('summary', null, `${problem.length} 条划线尚未定位`),
-              h('p', { role: 'status' }, '原文可能尚未加载或存在多个匹配。加载相关消息后可刷新文字标记。')) : null,
+              h('p', { role: 'status' }, '原文可能尚未加载、文本结构无法映射，或存在多个匹配。加载相关消息后可刷新文字标记。')) : null,
             !draft && state.diagnostic ? h('code', { role: 'status' }, safeDiagnostic({ code: state.diagnostic })) : null,
             !draft && state.status === 'failed' ? h('button', { type: 'button', style: controlStyle,
               onClick: () => void adapter.current?.reload() }, '刷新文字标记') : null,
             draft ? h('div', { 'data-notebook-overlay': '', role: 'dialog', 'aria-label': '选区操作',
-              style: { position: 'fixed', zIndex: 1000, left: Math.max(12, Math.min(draft.position.left, (window.innerWidth ?? 800) - 330)),
-                top: Math.max(12, Math.min(draft.position.top + 8, (window.innerHeight ?? 600) - (editing || tagMenu ? 320 : 56))),
-                width: editing || tagMenu ? 300 : 'max-content', maxWidth: 'calc(100vw - 24px)', maxHeight: 'calc(100vh - 24px)', overflowY: 'auto',
+              style: { position: 'fixed', zIndex: 1000, left: Math.max(12, Math.min(draft.position.left, (window.innerWidth ?? 800) - (editing || tagMenu ? 274 : 240))),
+                top: Math.max(12, Math.min(draft.position.top + 8, (window.innerHeight ?? 600) - (editing || tagMenu ? 280 : 56))),
+                width: editing || tagMenu ? 250 : 'max-content', maxWidth: 'calc(100vw - 24px)', maxHeight: 'calc(100vh - 24px)', overflowY: 'auto',
                 padding: 6, border: '1px solid var(--dsw-alias-border-l1, #d9dee7)', boxShadow: '0 4px 18px #0002', borderRadius: 9,
                 background: 'var(--dsw-alias-bg-base, white)', color: 'var(--dsw-alias-label-primary, #222)' } },
-              h('div', { style: { display: 'flex', gap: 4, alignItems: 'center' } },
-                h('button', { type: 'button', style: controlStyle, disabled: working || !!state.pending,
-                  onClick: () => void adapter.current?.save('highlight') }, body.trim() ? '保存' : '划线'),
+              h('div', { 'data-annotation-actions': true, style: { display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' } },
+                h('button', { type: 'button', style: annotationSaveStyle, disabled: working || !!state.pending || (tagMenu && !!tagDiagnostic),
+                  onClick: () => void adapter.current?.save('highlight') }, body.trim() ? (tagMenu ? '保存笔记' : '保存') : '保存划线'),
                 h('button', { type: 'button', style: controlStyle, 'aria-label': '添加标签', 'aria-expanded': tagMenu, disabled: working || !!state.pending,
                   onClick: () => { setTagMenu(value => !value); setEditing(false); } }, '标签 ▾'),
                 h('button', { type: 'button', style: controlStyle, disabled: working || !!state.pending,
@@ -2112,15 +2162,13 @@ button[data-notebook-menu]{width:100%;box-sizing:border-box}
                 h('button', { type: 'button', style: controlStyle, 'aria-label': '取消选区操作', disabled: working || !!state.pending,
                   onClick: () => { if (body) setConfirmDiscard(true); else adapter.current?.discard(); } }, '×')),
               confirmDiscard ? h('div', { 'data-annotation-discard': true }, h('p', null, '丢弃尚未保存的笔记？'),
-                h('button', { type: 'button', onClick: () => { adapter.current?.discard(true); setConfirmDiscard(false); } }, '丢弃'),
-                h('button', { type: 'button', onClick: () => setConfirmDiscard(false) }, '继续编辑')) : null,
-              tagMenu ? h('div', { 'data-annotation-tags': true, style: { padding: 8, display: 'grid', gap: 6 } },
-                ...tags.filter(tag => tag.isQuickTag).map(tag => h('button', { key: tag.id, type: 'button', style: controlStyle, disabled: working || !!state.pending,
-                  onClick: () => { adapter.current?.editTags([...new Set([...(state.tagIds ?? []), tag.id])], state.newTagName); if (body.trim()) { setEditing(true); setTagMenu(false); } else void adapter.current?.save('highlight'); } }, tag.name)),
+                h('button', { type: 'button', style: annotationSaveStyle, onClick: () => { adapter.current?.discard(true); setConfirmDiscard(false); } }, '丢弃'),
+                h('button', { type: 'button', style: controlStyle, onClick: () => setConfirmDiscard(false) }, '继续编辑')) : null,
+              tagMenu ? h('div', { 'data-annotation-tags': true, style: { padding: 4, display: 'grid', gap: 5 } },
                 h('fieldset', { 'data-annotation-tag-picker': true, disabled: working || !!state.pending,
                   style: { margin: 0, padding: 6, border: '1px solid var(--dsw-alias-border-l1, #d9dee7)', borderRadius: 6,
                     maxHeight: 160, overflowY: 'auto' } },
-                  h('legend', null, '选择标签（可多选）'),
+                  h('legend', null, '选择标签'),
                   ...tags.map(tag => h('label', { key: tag.id, style: { display: 'flex', alignItems: 'center', gap: 5, padding: '3px 2px', cursor: 'pointer' } },
                     h('input', { type: 'checkbox', checked: (state.tagIds ?? []).includes(tag.id),
                       disabled: working || !!state.pending || (!(state.tagIds ?? []).includes(tag.id) && (state.tagIds ?? []).length >= 10),
@@ -2131,15 +2179,11 @@ button[data-notebook-menu]{width:100%;box-sizing:border-box}
                       style: { '--tag-color': resolvedTagColor(tag.color, tag.id), marginRight: 0 } }), tag.name))),
                 h('input', { 'aria-label': '新标签名称', placeholder: '新建标签（可选）', value: state.newTagName ?? '', disabled: working || !!state.pending,
                   onChange: event => adapter.current?.editTags(state.tagIds ?? [], event.target.value) }),
-                h('button', { type: 'button', style: controlStyle, disabled: working || !!state.pending || !!tagDiagnostic,
-                  onClick: () => void adapter.current?.save('highlight') }, body.trim() ? '保存笔记和标签' : '保存划线'),
                 tagDiagnostic ? h('code', { role: 'status' }, tagDiagnostic) : null) : null,
               !tagMenu && ((state.tagIds ?? []).length || state.newTagName) ? h('div', { 'data-annotation-selected-tags': true, style: { padding: '6px 8px', fontSize: 11, color: 'var(--dsw-alias-label-secondary, #666)' } }, '标签：', [...(state.tagIds ?? []).map(id => tags.find(tag => tag.id === id)?.name ?? id), ...(state.newTagName ? [state.newTagName] : [])].join('、')) : null,
               editing ? h('div', { style: { padding: 8 } },
                 h('textarea', { value: body, placeholder: '笔记内容', 'aria-label': '笔记内容', disabled: working || !!state.pending,
-                  onChange: event => adapter.current?.editBody(event.target.value), style: { boxSizing: 'border-box', width: '100%', minHeight: 96 } }),
-                h('button', { type: 'button', style: controlStyle, disabled: working || !!state.pending || !body.trim(),
-                  onClick: () => void adapter.current?.save('note', body) }, '保存笔记')) : null,
+                  onChange: event => adapter.current?.editBody(event.target.value), style: { boxSizing: 'border-box', width: '100%', minHeight: 96 } })) : null,
               state.pending && !working ? h('button', { type: 'button', style: controlStyle, onClick: () => void adapter.current?.retry() }, '重试同一保存') : null,
               state.diagnostic ? h('code', { role: 'status' }, safeDiagnostic({ code: state.diagnostic })) : null) : null);
 
@@ -2208,22 +2252,13 @@ button[data-notebook-menu]{width:100%;box-sizing:border-box}
           }, h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 } },
             h('strong', null, text('title')),
             h('button', { type: 'button', style: controlStyle, onClick: closeOverlay }, text('close'))),
-          h(PhaseNotice),
           h(ManualDraft, { draftKey: 'global-overlay', draft, setDraft,
             onDiscard: closeAfterDiscard => { if (closeAfterDiscard) close(); } }),
           h(VersionLabel), h(ConnectionStatus));
         }
         function VersionLabel() {
-          const ready = useStorageReady();
           return h('small', { 'data-notebook-version': version,
-            style: { color: 'var(--dsw-alias-label-secondary)' } }, `v${version} · Phase ${ready ? 1 : 0}`);
-        }
-        function PhaseNotice() {
-          const ready = useStorageReady();
-          const text = useText();
-          return ready ? null : h('p', {
-            style: { color: 'var(--dsw-alias-label-secondary)', marginBottom: 0 },
-          }, text('empty'));
+            style: { color: 'var(--dsw-alias-label-secondary)' } }, `v${version}`);
         }
         function ConnectionStatus() {
           const text = useText();
@@ -3035,17 +3070,18 @@ button[data-notebook-menu]{width:100%;box-sizing:border-box}
                     : [...appliedRef.current.tagIds, tag.id], untagged: false }) },
                 h('span', { className: 'notebook-tag-color', 'aria-hidden': true,
                   style: { '--tag-color': resolvedTagColor(tag.color, tag.id) } }),
-                `${tag.name} · ${tag.active ?? 0}`)),
+                `${tag.name} · ${trashMode ? tag.trashed ?? 0 : tag.active ?? 0}`)),
                 h('button', { type: 'button', 'aria-pressed': applied.untagged,
                   onClick: () => filterNow({ tagIds: [], untagged: true }) }, text('libraryUntagged')))),
               h('details', { 'data-notebook-filters': true }, h('summary', null,
                applied.search || applied.from || applied.to ? '更多筛选 · 已启用' : '更多筛选'),
               h('div', { className: 'notebook-filter-grid' },
-              h('label', { className: 'notebook-advanced-keyword' }, text('librarySearch'),
-                h('input', { type: 'search', value: draft.search, placeholder: '搜索笔记内容…',
-                  onChange: event => edit({ search: event.target.value }) })),
-              selectOptions(draft.timeField, [['updated', 'libraryUpdated'], ['created', 'libraryCreated']],
-                value => edit({ timeField: value }), 'libraryTimeField'),
+              h('label', { className: 'notebook-advanced-keyword' },
+                h('input', { type: 'search', 'aria-label': text('librarySearch'), value: draft.search,
+                  placeholder: '搜索笔记内容…', onChange: event => edit({ search: event.target.value }) })),
+              h('label', null, text('libraryTimeField'),
+                selectOptions(draft.timeField, [['updated', 'libraryUpdated'], ['created', 'libraryCreated']],
+                  value => edit({ timeField: value }), 'libraryTimeField')),
               h('label', null, text('libraryFrom'), h('input', { type: 'datetime-local', step: 1, value: draft.from,
                 onChange: event => edit({ from: event.target.value }) })),
               h('label', null, text('libraryTo'), h('input', { type: 'datetime-local', step: 1, value: draft.to,
@@ -3653,7 +3689,6 @@ button[data-notebook-menu]{width:100%;box-sizing:border-box}
           }, h('div', { 'data-notebook-heading': true, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
             h('strong', null, text('title')),
             h('button', { type: 'button', style: controlStyle, onClick: closePanel }, text('close'))),
-          h(PhaseNotice),
           h('code', { style: { overflowWrap: 'anywhere' } }, sessionId),
           h(WorkspaceContext, { sessionId, useWorkspaces }),
           h(NotebookHome, { draftKey: `session:${sessionId}`, draft, setDraft, sessionId, useWorkspaces,

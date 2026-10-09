@@ -43,8 +43,20 @@ export function snapshotCoordinator({ domain, maxRequestBytes = DEFAULT_PREVIEW_
     }
     return snapshot;
   };
+  const refresh = async () => {
+    if (unknown) fail('COMMIT_UNKNOWN');
+    try {
+      if (typeof domain.reload === 'function') await domain.reload();
+    } catch (error) {
+      if (error?.code === 'STORE_OWNED') fail('READ_UNAVAILABLE');
+      unknown = true;
+      fail('READ_UNAVAILABLE');
+    }
+    return read();
+  };
   return {
     read,
+    refresh,
     mutate(request, candidate) {
       if (closed) return Promise.reject(failure('CLOSED'));
       if (unknown) return Promise.reject(failure('COMMIT_UNKNOWN'));
@@ -59,7 +71,7 @@ export function snapshotCoordinator({ domain, maxRequestBytes = DEFAULT_PREVIEW_
       const result = tail.then(async () => {
         if (unknown) fail('COMMIT_UNKNOWN');
         if (typeof candidate !== 'function' || !validId(frozen.requestId)) fail('VALIDATION_FAILED');
-        const current = read();
+        const current = await refresh();
         if (frozen.epoch !== current.epoch) fail('EPOCH_CONFLICT');
         const hash = createHash('sha256').update(canonical(frozen)).digest('hex');
         const prior = Object.hasOwn(current.operationReceipts, frozen.requestId)
@@ -108,7 +120,12 @@ export function snapshotCoordinator({ domain, maxRequestBytes = DEFAULT_PREVIEW_
           if (bytes > maxSnapshotBytes) fail('SNAPSHOT_LIMIT');
         }
         try { await domain.global.set(checked); }
-        catch { unknown = true; fail('COMMIT_UNKNOWN'); }
+        catch (error) {
+          if (['VERSION_CONFLICT', 'EPOCH_CONFLICT'].includes(error?.code)) fail(error.code);
+          if (['STORE_OWNED', 'STORE_UNAVAILABLE'].includes(error?.code)) fail('READ_UNAVAILABLE');
+          unknown = true;
+          fail('COMMIT_UNKNOWN');
+        }
         return { epoch: checked.epoch, revision: checked.revision,
           ...(frozen.id && { noteId: frozen.id }) };
       });

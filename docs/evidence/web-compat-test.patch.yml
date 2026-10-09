@@ -1,5 +1,0 @@
-# Temporary startup overlay, not a persistent Profile installation.
-- insert:
-    - id: session-notebook-web-compat
-      name: ../../src/host/index.js
-      config: {}

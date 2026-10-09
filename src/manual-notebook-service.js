@@ -61,6 +61,7 @@ export function manualNotebookService({ domain, now = () => new Date().toISOStri
   const store = snapshotCoordinator({ domain, ...limits });
   const uploads = restoreUpload();
   return {
+    refresh() { return store.refresh(); },
     anchors(request) {
       try {
         keys(request, ['sessionId', 'offset', 'limit'], ['sessionId']);
