@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Capture notes from conversations, organize and search with tags, and manage edits, trash, and backups.",
   "repository": { "type": "git", "url": "git+https://github.com/timestatic/dsh-session-notebook.git" },
+  "license": "Apache-2.0",
   "publishConfig": { "access": "public" },
   "type": "module",
   "engines": { "node": ">=22" },
